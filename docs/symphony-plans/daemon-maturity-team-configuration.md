@@ -31,6 +31,7 @@ migration belongs to the switchover.
 | Daemon dispatch/evaluating   | Started                  | Equals `tracker.daemon_dispatch_state` and is also listed in `tracker.active_states`.                                            | Daemon-only lease target. It must be excluded from the implementation-class active scope.    |
 | Done                         | Completed                | Listed in `tracker.terminal_states`.                                                                                             | Existing done state may be reused.                                                           |
 | Cancelled                    | Canceled                 | Listed in `tracker.terminal_states`.                                                                                             | Existing cancelled state may be reused.                                                      |
+| Duplicate                    | Duplicate                | Listed in `tracker.terminal_states` when the deployment has a duplicate workflow state.                                          | Existing duplicate state may be reused.                                                      |
 
 The daemon dispatch state is a deliberate extra active state. It is a work-class
 state, not a pipeline state. It exists so daemon evaluation can be dispatched,
@@ -44,6 +45,12 @@ remaining distinguishable from normal implementation work.
 | Maturity marker       | At least one configured `tracker.maturity_labels` value. | Before maturity-gated dependency dispatch is enabled.  | The default value is `mature`. Empty `maturity_labels` reproduces upstream terminal-only blocker behavior.                                                              |
 | Daemon cadence        | `wake:15m`, `wake:1h`, `wake:4h`, `wake:1d`.             | Before real daemon use.                                | The wake implementation lowercases and trims label names before matching. Unknown, absent, or conflicting wake labels use the workflow default and never mean wake-now. |
 | Inactive reason hints | `waiting:human`, `waiting:ai-review`, `waiting:ci`.      | Before the inactive state is adopted for live tickets. | These labels are non-exclusive stale-cache hints; the reconciler must re-derive the true waiting reason from reality.                                                   |
+
+Do not adopt the inactive state for a deployment unless there is also a
+reliable releaser for the waiting reasons. Where GitHub-to-Linear bridge
+automation exists, bridge events can release tickets from `waiting:*` labels.
+Where that automation does not exist, moving live tickets to inactive states can
+strand them instead of pausing them.
 
 ### Switchover Invariants
 
@@ -62,7 +69,7 @@ remaining distinguishable from normal implementation work.
 
 Team: `ABC` / `Symphony` (`2395627c-dad6-46f1-8345-cd82bae50680`).
 
-Dispatch state name decision: `Evaluating`.
+Dispatch state name proposal pending human-lead ratification: `Evaluating`.
 
 Target switchover config values:
 
@@ -74,6 +81,7 @@ tracker:
   terminal_states:
     - Done
     - Canceled
+    - Duplicate
   daemon_states:
     - Happy
     - Unhappy
@@ -105,10 +113,11 @@ Verified by query after creation on 2026-07-25:
 | Backlog                      | `Backlog`      | `backlog`   | `#bec2c8` | `3b055245-258c-49e1-96bf-dcd416fd8059` | Existing; unchanged.                                    |
 | Done                         | `Done`         | `completed` | `#5e6ad2` | `733d1bce-7420-4b00-b4cf-b6614afc7125` | Existing; unchanged.                                    |
 | Cancelled                    | `Canceled`     | `canceled`  | `#95a2b3` | `e5d310e9-4cea-48de-9dad-cc5f7f0f2b87` | Existing; unchanged.                                    |
+| Duplicate                    | `Duplicate`    | `duplicate` | `#95a2b3` | `72d1e676-671b-4b11-a6a2-1dfccebfdd79` | Existing; unchanged.                                    |
 
 Legacy implementation/review states still exist and were not deleted or used for
 state migration by this ticket: `Todo`, `In Progress`, `Rework`,
-`Waiting for CI`, `Human Input Needed`, `In Review`, and `Duplicate`.
+`Waiting for CI`, `Human Input Needed`, and `In Review`.
 
 ### Label Record
 
@@ -129,7 +138,10 @@ Deferred until `Inactive` is adopted for live tickets:
 - `waiting:ci`
 
 Those labels were not created by ABC-295 because no tickets were migrated to
-`Inactive` and the inactive reason workflow is not live yet.
+`Inactive` and the inactive reason workflow is not live yet. For fork-hosted
+work in `Orchestra-Bio/symphony`, there are also no GitHub-to-Linear bridge
+workflows to release tickets from `waiting:*` labels, so adopting `Inactive`
+there would strand tickets unless an operator manually performs every release.
 
 ### Recorded Creation Operations
 
@@ -256,14 +268,17 @@ Variables:
 - Configure `tracker.active_states` to include `Active` and `Evaluating`.
 - Configure implementation-class dispatch to use active states minus
   `Evaluating`.
+- Ratify `Evaluating` with the human lead before treating the daemon dispatch
+  state name as final.
 - Configure `tracker.daemon_dispatch_state` as `Evaluating`.
 - Configure `tracker.daemon_states` as `Happy` and `Unhappy`.
+- Configure `tracker.terminal_states` as `Done`, `Canceled`, and `Duplicate`.
 - Configure `tracker.maturity_labels` as `mature`, unless intentionally
   disabling the maturity gate with an empty list.
 - Confirm daemon cadence labels exist before creating or operating daemon
   tickets.
-- Create and verify `waiting:*` labels before adopting `Inactive` for live
-  tickets.
+- Create and verify `waiting:*` labels, and confirm release automation exists,
+  before adopting `Inactive` for live tickets.
 - Migrate issue states only during the switchover, not during setup.
 - Leave legacy states and labels in place until well after a successful
   switchover.
