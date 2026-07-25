@@ -130,7 +130,7 @@ defmodule SymphonyElixir.Config do
 
   @doc false
   @spec present_string?(term()) :: boolean()
-  def present_string?(value) when is_binary(value), do: String.trim(value) != ""
+  def present_string?(value) when is_binary(value), do: true
   def present_string?(_value), do: false
 
   defp format_config_error(reason) do

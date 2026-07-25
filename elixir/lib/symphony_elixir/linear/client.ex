@@ -5,6 +5,7 @@ defmodule SymphonyElixir.Linear.Client do
 
   require Logger
   alias SymphonyElixir.{Config, Linear.Issue}
+  alias SymphonyElixir.Config.Schema.Tracker, as: TrackerConfig
 
   @issue_page_size 50
   @max_error_body_log_bytes 1_000
@@ -280,13 +281,13 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp finalize_paginated_issues(acc_issues) when is_list(acc_issues), do: Enum.reverse(acc_issues)
 
-  defp issue_selector(tracker) when is_map(tracker) do
+  defp issue_selector(%TrackerConfig{} = tracker) do
     cond do
-      Config.present_string?(Map.get(tracker, :project_slug)) ->
-        {:ok, {:project_slug, String.trim(Map.get(tracker, :project_slug))}}
+      Config.present_string?(tracker.project_slug) ->
+        {:ok, {:project_slug, tracker.project_slug}}
 
-      Config.present_string?(Map.get(tracker, :team_key)) ->
-        {:ok, {:team_key, String.trim(Map.get(tracker, :team_key))}}
+      Config.present_string?(tracker.team_key) ->
+        {:ok, {:team_key, tracker.team_key}}
 
       true ->
         {:error, :missing_linear_issue_selector}

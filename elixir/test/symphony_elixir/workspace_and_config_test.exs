@@ -1062,6 +1062,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "in progress" => 2
            }
 
+    assert Schema.normalize_optional_string(" value ") == "value"
+    assert Schema.normalize_optional_string(" ") == nil
+    assert Schema.normalize_optional_string(123) == nil
+
     changeset =
       {%{}, %{limits: :map}}
       |> Changeset.cast(%{limits: %{"" => 1, "todo" => 0}}, [:limits])
@@ -1071,6 +1075,38 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              limits: {"state names must not be blank", []},
              limits: {"limits must be positive integers", []}
            ]
+  end
+
+  test "schema normalizes tracker selector strings" do
+    previous_linear_api_key = System.get_env("LINEAR_API_KEY")
+    on_exit(fn -> restore_env("LINEAR_API_KEY", previous_linear_api_key) end)
+    System.put_env("LINEAR_API_KEY", "fallback-linear-token")
+
+    assert {:ok, settings} =
+             Schema.parse(%{
+               tracker: %{
+                 api_key: " token ",
+                 project_slug: " project ",
+                 team_key: " ABC "
+               }
+             })
+
+    assert settings.tracker.api_key == "token"
+    assert settings.tracker.project_slug == "project"
+    assert settings.tracker.team_key == "ABC"
+
+    assert {:ok, settings} =
+             Schema.parse(%{
+               tracker: %{
+                 api_key: "   ",
+                 project_slug: " ",
+                 team_key: "\t"
+               }
+             })
+
+    assert settings.tracker.api_key == nil
+    assert settings.tracker.project_slug == nil
+    assert settings.tracker.team_key == nil
   end
 
   test "schema parse normalizes policy keys and env-backed fallbacks" do

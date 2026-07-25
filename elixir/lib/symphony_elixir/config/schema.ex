@@ -42,6 +42,8 @@ defmodule SymphonyElixir.Config.Schema do
     use Ecto.Schema
     import Ecto.Changeset
 
+    alias SymphonyElixir.Config.Schema
+
     @primary_key false
 
     embedded_schema do
@@ -74,6 +76,8 @@ defmodule SymphonyElixir.Config.Schema do
         ],
         empty_values: []
       )
+      |> update_change(:project_slug, &Schema.normalize_optional_string/1)
+      |> update_change(:team_key, &Schema.normalize_optional_string/1)
       |> update_change(:required_labels, fn labels ->
         labels
         |> Enum.map(&(String.trim(&1) |> String.downcase()))
@@ -347,6 +351,17 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   @doc false
+  @spec normalize_optional_string(term()) :: String.t() | nil
+  def normalize_optional_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  def normalize_optional_string(_value), do: nil
+
+  @doc false
   @spec normalize_state_limits(nil | map()) :: map()
   def normalize_state_limits(nil), do: %{}
 
@@ -498,7 +513,7 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp normalize_secret_value(value) when is_binary(value) do
-    if value == "", do: nil, else: value
+    normalize_optional_string(value)
   end
 
   defp normalize_secret_value(_value), do: nil

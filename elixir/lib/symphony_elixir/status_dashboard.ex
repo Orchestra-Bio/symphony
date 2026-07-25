@@ -398,10 +398,10 @@ defmodule SymphonyElixir.StatusDashboard do
     {scope_label, scope_part} =
       cond do
         Config.present_string?(tracker.project_slug) ->
-          {"Project", colorize(linear_project_url(String.trim(tracker.project_slug)), @ansi_cyan)}
+          {"Project", colorize(linear_project_url(tracker.project_slug), @ansi_cyan)}
 
         Config.present_string?(tracker.team_key) ->
-          {"Team", colorize(String.trim(tracker.team_key), @ansi_cyan)}
+          {"Team", colorize(tracker.team_key, @ansi_cyan)}
 
         true ->
           {"Project", colorize("n/a", @ansi_gray)}
