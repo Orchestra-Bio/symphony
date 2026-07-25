@@ -2,6 +2,8 @@
 tracker:
   kind: linear
   project_slug: "symphony-0c79b11b75ea"
+  # Use team_key instead of project_slug for team-scoped polling.
+  # team_key: ABC
   required_labels: []
   active_states:
     - Todo
