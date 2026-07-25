@@ -85,6 +85,12 @@ Integration branch read:
 | Hook contract is workspace-cwd only.                                            | `SPEC.md` says hooks execute with the workspace as `cwd`; `Workspace.run_hook/5` runs local hooks with `System.cmd("sh", ["-lc", command], cd: workspace)` and remote hooks after `cd <workspace>`.                                    | confirmed             | yes                                      | No hook environment metadata is present in the current hook contract.                                                                                                                                         |
 | `SPEC.md` still treats first-class orchestrator tracker writes as a TODO.       | `SPEC.md` says tracker mutations are typically agent-tool work and lists first-class tracker write APIs as a TODO. Current `Linear.Adapter` already has narrow `create_comment/2` and `update_issue_state/2`, but no `commentUpdate`.  | drifted, non-blocking | yes, with current adapter facts          | The drift does not block planning: the design already relies on narrow orchestrator state/comment writes. Exhaustion work still needs edit-in-place support or a deliberate create-only fallback.             |
 
+Because dispatch-time revalidation also routes through `retry_candidate_issue?/2`,
+replacing that helper means the maturity gate will be evaluated immediately
+before dispatch as well as during candidate selection. That matches the design's
+revalidate-before-dispatch requirement and avoids adding a redundant second
+check.
+
 ## Retry Boundary Verification
 
 ### Current Retry Path
