@@ -53,6 +53,10 @@ Authoritative project sources:
   including `S11`, `S12`, and `D9` as cited by the merged requirements and
   design. These comments are the decision source wherever the 2026-07-19
   handoffs conflict.
+- Human review comments on `Orchestra-Bio/symphony` PR #3 from 2026-07-25.
+  These are the rework source for initial ticket state, manual promotion order,
+  late `DIVERGENCES.md` content, maturity-gate rollout scope, and real-use
+  validation.
 
 Background sources read, superseded where they conflict with the merged
 requirements/design:
@@ -126,11 +130,20 @@ Unavailable sources: none.
 - The merged requirements/design in `docs/symphony-plans/` are authoritative;
   the 2026-07-19 handoffs and uploaded spec are background only where they
   conflict with `S11`, `S12`, or `D9`.
-- `DIVERGENCES.md` is created early, before the first implementation divergence
-  lands. Cookbook material remains outside `DIVERGENCES.md`.
+- Fan-out creates eleven inert `Backlog` tickets. Nothing starts until a human
+  promotes a ticket out of `Backlog`; promotion order is a runbook, not an
+  automated frontier.
+- PR #3 review decision D-B supersedes the early-file timing in R16 for this
+  plan: `DIVERGENCES.md` content lands late, beside cookbook and real-use
+  evidence, after daemon and maturity behavior has settled. Until then, the
+  global guardrail against editing `SPEC.md` protects fork divergence records.
+  Cookbook material remains outside `DIVERGENCES.md`.
 - The tracker config surface for this phase is
   `daemon_states`, `daemon_dispatch_state`, `daemon_default_wake`, and
   `maturity_labels`. Do not add `daemon_label` or class-budget config.
+- PR #3 review decision D-C adds one maturity-gate rollout field,
+  `maturity_gate_state_scope`, defaulting to `["todo"]`. This is a switch-risk
+  reducer, not class-budget config.
 - Recurring-work budget is satisfied by the existing
   `agent.max_concurrent_agents_by_state` cap on the daemon dispatch state.
   Ceilings only; no floors.
@@ -154,6 +167,10 @@ Unavailable sources: none.
 - The hardcoded `Todo`-only terminal blocker helper must be replaced at both
   `should_dispatch_issue?/4` and `retry_candidate_issue?/2`, sharing one gate
   implementation.
+- The first maturity-gate rollout keeps the configured state scope at
+  `["todo"]` so the fork engine can be switched with blocker behavior
+  unchanged, confirmed, and widened later as a separate human-approved config
+  change.
 - Blocker maturity regression creates one advisory comment per observed
   transition and never kills the worker.
 - Daemon-state blockers in the maturity gate are ignored with a warning because
@@ -184,25 +201,39 @@ All generated task PRs should target `main` by default and carry GitHub labels
 `pink` and `symphony`. Linear issues should carry label `pink` and should be
 assigned to Jeremy Carroll when Linear identity resolution is available.
 
-Fan-out dependencies below are sequencing guidance, not Linear blocker
+Fan-out dependencies below are human promotion guidance, not Linear blocker
 relations, unless a human explicitly requests blocker links after reviewing
 this plan. For this integration-branch project, a dependency is satisfied when
 the upstream issue is project-integrated into
 `symphony/daemon-maturity/integration` with validation evidence recorded.
 
-The first fan-out batch is verification and docs runway:
+Fan-out produces eleven `Backlog` tickets. Nothing starts until a human promotes
+it out of `Backlog`. This is intentional: the project is building the blocker,
+DAG, and frontier machinery that would otherwise automate this ordering, so the
+initial state must not pretend that machinery already exists.
 
-- `DMAT-001`, `DMAT-002`, `DMAT-003`, and `DMAT-004` start in `Todo`.
-- `DMAT-005` starts in `Backlog` but should move before any behavior-divergence
-  implementation leaves `Backlog`, because it creates the early
-  `DIVERGENCES.md` runway.
-- Implementation and demo tickets start in `Backlog` and should not be moved to
-  `Todo` until the required verification tickets are project-integrated or a
-  human explicitly accepts a narrower risk.
+Suggested human promotion order:
 
-No generated ticket should create additional Linear `blockedBy` or `blocks`
-relations from this plan. The only dependency semantics carried forward are the
-typed dependency entries in each ticket description.
+- Promote `DMAT-001`, `DMAT-002`, `DMAT-003`, and `DMAT-004` first to verify
+  the Linear, upstream, CI, and state mechanics that implementation depends on.
+- Promote daemon implementation next: `DMAT-006`, `DMAT-007`, `DMAT-008`, and
+  `DMAT-009`, preserving each item's dependency entries before promotion.
+- After daemon lifecycle behavior is project-integrated, promote the sentinel
+  portion of `DMAT-011` and let the real daemon run.
+- Promote `DMAT-010` last for the blocker-gate replacement, with
+  `maturity_gate_state_scope` left at its default `["todo"]`. Confirm the fork
+  switch with blocker behavior unchanged, then widen the scope only through a
+  separate human-approved config change.
+- Promote `DMAT-005` beside the final cookbook and real-use evidence, after
+  daemon and maturity behavior has settled enough to document actual fork
+  divergences.
+
+No generated `DMAT-*` ticket should create additional Linear `blockedBy` or
+`blocks` relations among the generated `DMAT-*` tickets from this plan. That
+prohibition does not apply to temporary or human-approved Linear demo fixtures
+owned by `DMAT-011`, whose maturity proof requires real blocker relations. The
+dependency semantics carried forward for the generated tickets are the typed
+dependency entries in each ticket description plus this promotion runbook.
 
 ## Global Guardrails
 
@@ -213,10 +244,12 @@ typed dependency entries in each ticket description.
   functions in `lib/` need adjacent `@spec`; prefer targeted tests while
   iterating and `make -C elixir all` before handoff unless blocked.
 - Do not edit `SPEC.md` for fork divergences unless a verification ticket
-  proves a source conflict and a human accepts the change. Fork behavior belongs
-  in `DIVERGENCES.md`.
-- Do not pre-document conventions that have not landed. `DIVERGENCES.md` grows
-  as behavior lands; cookbook docs grow as operator conventions exist.
+  proves a source conflict and a human accepts the change. PR #3 review
+  decision D-B makes this guardrail the protection before late
+  `DIVERGENCES.md` content exists; do not remove it as redundant.
+- Do not pre-document conventions that have not landed. `DIVERGENCES.md` is
+  written or updated only after behavior has landed; cookbook docs grow as
+  operator conventions exist.
 - Record isolated validation on each clean task branch and composed validation
   after merging into `symphony/daemon-maturity/integration`.
 - If a ticket introduces a project-scoped TODO, stub, adapter, disabled path,
@@ -229,7 +262,7 @@ typed dependency entries in each ticket description.
 
 ticket_title: Verify daemon comment metadata, wake-label, and blocker fetch mechanics
 
-initial_status: Todo
+initial_status: Backlog
 
 difficulty: hard
 
@@ -324,7 +357,7 @@ exclusions:
 
 ticket_title: Verify current SPEC.md and retry-exhaustion facts
 
-initial_status: Todo
+initial_status: Backlog
 
 difficulty: hard
 
@@ -409,7 +442,7 @@ exclusions:
 
 ticket_title: Add tree-equality CI for fork main and derived rebased branch
 
-initial_status: Todo
+initial_status: Backlog
 
 difficulty: hard
 
@@ -486,7 +519,7 @@ exclusions:
 
 ticket_title: Verify maturity relation, label, and custom state mechanics
 
-initial_status: Todo
+initial_status: Backlog
 
 difficulty: hard
 
@@ -573,91 +606,6 @@ exclusions:
 - Do not migrate Linear team states.
 - Do not change the existing blocker gate.
 
-### DMAT-005 - Create Divergence And Documentation Runway
-
-ticket_title: Create early DIVERGENCES.md runway for daemon maturity
-
-initial_status: Backlog
-
-difficulty: easy
-
-ownership: Symphony documentation agent; human reviewer Jeremy Carroll; target
-repository `Orchestra-Bio/symphony`.
-
-scope: Create the early documentation runway required before behavior
-divergences land. This ticket creates `DIVERGENCES.md` with a compact
-project-owned structure and either placeholder headings or initial paragraphs
-only for behavior already established by merged requirements/design. It does
-not document out-of-phase behavior or cookbook conventions before they exist.
-
-source_files:
-
-- `docs/symphony-plans/daemon-maturity-requirements.md`
-- `docs/symphony-plans/daemon-maturity-design.md`
-- `SPEC.md`
-- `README.md`
-
-owned_files:
-
-- `DIVERGENCES.md`
-- `docs/symphony-plans/daemon-maturity-documentation-runway.md`
-
-source_notes:
-
-- Requirements R16 and R18.
-- Design `Documentation And Repository Strategy`.
-- PR #1 and PR #2 decisions limiting what should and should not be
-  pre-documented.
-
-dependencies:
-
-- item: DMAT-002
-  type: integration
-  requires: upstream SPEC verification is project-integrated or explicitly
-  blocked with a human-owned decision
-  reason: divergence text should compare against confirmed upstream behavior,
-  not stale assumptions.
-
-integration_pattern: none
-
-initial_labels:
-
-- Linear: `pink`
-- GitHub PR: `pink`, `symphony`
-
-required_actions:
-
-- Create root `DIVERGENCES.md` before implementation tickets introduce behavior
-  divergences.
-- Include only daemon/maturity divergence areas established by the merged
-  requirements/design: daemon states and timer-only wake semantics, the daemon
-  dispatch state and per-state budget, the daemon lease flip and exhaustion
-  park, maturity-gated dependency dispatch, and the hardcoded `Todo` blocker
-  gate replacement.
-- Keep team-scoped dispatch, hook environment metadata,
-  one-orchestrator-per-team, and `branch_name` behavior out of the doc until a
-  requirement or implementation ticket establishes them.
-- Add a small runway note explaining where future cookbook docs should live.
-
-acceptance_checks:
-
-- `DIVERGENCES.md` exists before behavior-divergence implementation starts.
-- The file contains no implementation TODOs, no unverified claims, no class
-  budget config, no `daemon_label`, and no out-of-phase items.
-- Targeted validation includes Markdown formatting for owned docs.
-
-split_criteria:
-
-- audience-conflict
-- historical-vs-current
-- workflow-boundary
-
-exclusions:
-
-- Do not implement daemon or maturity behavior.
-- Do not edit `SPEC.md`.
-- Do not create cookbook docs for conventions that have not landed.
-
 ### DMAT-006 - Add Config And Normalized Model Runway
 
 ticket_title: Add daemon and maturity config plus normalized data runway
@@ -720,11 +668,6 @@ dependencies:
   project-integrated or blocked with accepted fallback
   reason: daemon dispatch-state and blocker-label fields should match verified
   Linear mechanics.
-- item: DMAT-005
-  type: integration
-  requires: early `DIVERGENCES.md` runway is project-integrated
-  reason: config behavior is a fork divergence and should not land before the
-  divergence record exists.
 
 integration_pattern: none
 
@@ -1106,7 +1049,10 @@ scope: Implement the direct-edge maturity gate and wire it into both current
 blocker call sites. The gate replaces the hardcoded `Todo`-only terminal helper
 with shared `maturity_labels` logic, uses `{:gated, blockers}` naming, ignores
 daemon-state blockers with a warning, and emits one advisory comment per
-observed maturity regression without killing the dependent worker.
+observed maturity regression without killing the dependent worker. It also owns
+the one-field rollout scope for the blocker gate: `maturity_gate_state_scope`,
+defaulting to `["todo"]`, so the fork engine can be switched with blocker
+behavior unchanged before a later human-approved widening.
 
 source_files:
 
@@ -1117,6 +1063,7 @@ source_files:
 - `elixir/lib/symphony_elixir/linear/client.ex`
 - `elixir/lib/symphony_elixir/linear/issue.ex`
 - `elixir/lib/symphony_elixir/config.ex`
+- `elixir/lib/symphony_elixir/config/schema.ex`
 - `elixir/docs/logging.md`
 
 owned_files:
@@ -1125,6 +1072,9 @@ owned_files:
 - `elixir/lib/symphony_elixir/orchestrator.ex`
 - `elixir/lib/symphony_elixir/linear/client.ex`
 - `elixir/lib/symphony_elixir/linear/issue.ex`
+- `elixir/lib/symphony_elixir/config.ex`
+- `elixir/lib/symphony_elixir/config/schema.ex`
+- `elixir/test/symphony_elixir/daemon_maturity_config_test.exs`
 - `elixir/test/symphony_elixir/maturity_gate_test.exs`
 - `elixir/test/symphony_elixir/orchestrator_maturity_gate_test.exs`
 
@@ -1135,6 +1085,8 @@ source_notes:
   `Regression Prod`, and `Plan-Side Obligations`.
 - PR #2 `M-1`, `M-3`, and `M-4`: two call sites, Todo-gate divergence, and
   `{:gated, blockers}` result naming.
+- PR #3 review decision D-C: keep first rollout scoped to `["todo"]` so the
+  engine switch can be confirmed before widening maturity dispatch.
 
 dependencies:
 
@@ -1148,10 +1100,6 @@ dependencies:
   requires: config/model runway is project-integrated
   reason: the gate consumes shared `maturity_labels`, `daemon_states`, and
   blocker-label fields.
-- item: DMAT-005
-  type: integration
-  requires: early `DIVERGENCES.md` runway is project-integrated
-  reason: replacing the Todo-only gate is a fork divergence.
 - item: DMAT-009
   type: integration
   requires: daemon lifecycle wiring is project-integrated or a human-approved
@@ -1171,6 +1119,9 @@ required_actions:
 - Extend blocker refs with normalized blocker labels from the verified Linear
   query shape.
 - Add `SymphonyElixir.MaturityGate` or an equivalent pure module.
+- Add typed config for `tracker.maturity_gate_state_scope`, defaulting to
+  `["todo"]`, and apply the maturity gate only to candidate issues whose
+  normalized state is in that scope.
 - Treat a direct blocker as satisfied when it is terminal or has a configured
   maturity label. Empty `maturity_labels` reproduces terminal-only behavior.
 - Ignore daemon-state blockers with a warning/diagnostic result because daemon
@@ -1187,6 +1138,9 @@ required_actions:
 acceptance_checks:
 
 - Unit tests prove empty maturity config keeps upstream terminal-only behavior.
+- Unit tests prove the default `maturity_gate_state_scope: ["todo"]` preserves
+  the current hardcoded `Todo` scope and that an explicitly widened scope
+  enables the intended candidate states.
 - Unit tests prove direct mature blockers open depth-2 dispatch and compose in
   depth-3 synthetic graphs without transitive depth checks.
 - Tests cover immature blockers, daemon-state blockers, both gate call sites,
@@ -1212,9 +1166,9 @@ exclusions:
 - Do not enforce `max_stack_depth` in the engine.
 - Do not implement Project B branch-base or join-branch behavior.
 
-### DMAT-011 - Complete Cookbook And Real Linear Demo Evidence
+### DMAT-011 - Complete Cookbook And Real-Use Evidence
 
-ticket_title: Document cookbook conventions and demonstrate daemon maturity behavior
+ticket_title: Document cookbook conventions and verify daemon maturity by real use
 
 initial_status: Backlog
 
@@ -1223,14 +1177,15 @@ difficulty: hard
 ownership: Symphony validation/documentation agent; human reviewer Jeremy
 Carroll; target repository `Orchestra-Bio/symphony`.
 
-scope: Complete the public cookbook material and collect project-level evidence
-for the flagship project-completion sentinel daemon and maturity-gated
-dependency behavior. The demo must use a real Linear project unless missing
-state setup, permissions, or credentials are recorded as an explicit blocker.
+scope: Complete the public cookbook material and verify the flagship
+project-completion sentinel daemon and maturity-gated dependency behavior by
+real use. The validation path is merge, run it, and fix or revert what breaks;
+it is not a staged synthetic demo substituted for actual use. The run must use
+a real Linear project unless missing state setup, permissions, or credentials
+are recorded as an explicit blocker.
 
 source_files:
 
-- `DIVERGENCES.md`
 - `docs/symphony-plans/daemon-maturity-requirements.md`
 - `docs/symphony-plans/daemon-maturity-design.md`
 - `elixir/README.md`
@@ -1242,20 +1197,23 @@ owned_files:
 - `examples/cookbook/daemon-workpad-verdicts.md`
 - `examples/cookbook/repo-neutral-workspaces.md`
 - `examples/cookbook/multi-repo-workspaces.md`
-- `docs/symphony-smoke-daemon-maturity.md`
+- `docs/symphony-daemon-maturity-real-use.md`
 
 source_notes:
 
-- Requirements R9, R16, and project done predicate.
+- Requirements R9, R16, R18, and project done predicate.
 - Design `Documentation And Repository Strategy`, `Validation Strategy`, and
   `Requirement Coverage`.
-- The flagship sentinel demo queries every issue in a real Linear project with
-  `linear_graphql`, including terminal issues.
+- The flagship sentinel real-use run queries every issue in a real Linear
+  project with `linear_graphql`, including terminal issues.
+- PR #3 review decision D-C: real use replaces staged project-level evidence;
+  fork `main` recovery is ordinary revert plus restart, while switch risk is
+  reduced by first running the maturity gate with state scope `["todo"]`.
 
 owned_external_resources:
 
-- Temporary or human-approved real Linear project/issues used for daemon
-  sentinel and maturity smoke verification.
+- Human-approved real Linear project/issues used for daemon sentinel and
+  maturity real-use verification.
 
 dependencies:
 
@@ -1265,12 +1223,10 @@ dependencies:
   reason: the sentinel must exercise implemented daemon behavior.
 - item: DMAT-010
   type: integration
-  requires: maturity gate and regression advisory are project-integrated
-  reason: the DAG demo must exercise implemented maturity behavior.
-- item: DMAT-005
-  type: integration
-  requires: divergence runway is project-integrated
-  reason: cookbook docs should link to the fork divergence record.
+  requires: maturity gate and regression advisory are project-integrated before
+  the maturity portion of this ticket is claimed complete
+  reason: the DAG and regression observations must exercise implemented
+  maturity behavior.
 
 integration_pattern: none
 
@@ -1286,12 +1242,18 @@ required_actions:
 - Identify or create a real Linear project suitable for a project-completion
   sentinel. If required states, labels, or permissions are missing, record a
   precise `Input Needed` handoff instead of substituting unit tests.
+- After daemon lifecycle behavior is merged to fork `main`, run the sentinel in
+  real use. If it breaks, record the failure, fix forward or revert by ordinary
+  commit, restart, and rerun.
 - Run a sentinel daemon that queries every ticket in the project via
   `linear_graphql`, including terminal tickets.
 - Prove the project completion predicate: all daemons Happy and all
   non-daemons Done or Cancelled.
 - Demonstrate an Unhappy/advisory path where the sentinel records the
   incomplete condition without relying on comment-triggered wake.
+- After maturity-gate behavior is merged with
+  `maturity_gate_state_scope: ["todo"]`, confirm blocker behavior is unchanged
+  under that default before any human-approved widening.
 - Demonstrate a depth-2 maturity-gated chain where blocker maturity allows
   dependent dispatch before blocker terminal completion.
 - Demonstrate maturity regression where removing the maturity label emits one
@@ -1299,16 +1261,17 @@ required_actions:
 
 acceptance_checks:
 
-- `docs/symphony-smoke-daemon-maturity.md` records target ref, Linear project,
+- `docs/symphony-daemon-maturity-real-use.md` records target ref, Linear project,
   issue identifiers, daemon cadence labels, verdict workpads, maturity labels,
+  deployment/switch config, fixes or reverts performed, restart evidence,
   dispatch/advisory observations, result, limitations, and next handoff.
 - Cookbook entries are repo-neutral and do not expose internal-only Google Doc
   links as required public reading.
 - Unit/integration tests from prior items are not claimed as a substitute for
-  real Linear proof. If real Linear demo access is missing, the ticket stops
+  real Linear use. If real Linear project access is missing, the ticket stops
   with structured missing-access evidence.
 - Targeted validation includes Markdown formatting for owned docs and any
-  relevant smoke commands used by the demo.
+  relevant commands used during real use.
 
 split_criteria:
 
@@ -1323,13 +1286,119 @@ exclusions:
   approves.
 - Do not open an upstream PR or adoption pitch.
 
+### DMAT-005 - Create Final Divergences Documentation
+
+ticket_title: Create DIVERGENCES.md after daemon maturity behavior settles
+
+initial_status: Backlog
+
+difficulty: easy
+
+ownership: Symphony documentation agent; human reviewer Jeremy Carroll; target
+repository `Orchestra-Bio/symphony`.
+
+scope: Create `DIVERGENCES.md` late, beside the final cookbook and real-use
+evidence, after daemon and maturity behavior has settled. PR #3 review decision
+D-B supersedes R16's early-file timing for this fan-out. Until this ticket
+lands, the plan's global `SPEC.md` guardrail is the mechanism that prevents
+fork divergences from being recorded in upstream-owned `SPEC.md`.
+
+source_files:
+
+- `docs/symphony-plans/daemon-maturity-requirements.md`
+- `docs/symphony-plans/daemon-maturity-design.md`
+- `SPEC.md`
+- `README.md`
+- `docs/symphony-daemon-maturity-real-use.md`
+
+owned_files:
+
+- `DIVERGENCES.md`
+- `docs/symphony-plans/daemon-maturity-divergences-evidence.md`
+
+source_notes:
+
+- Requirements R16 and R18, as superseded for timing by PR #3 review decision
+  D-B.
+- Design `Documentation And Repository Strategy`.
+- PR #1 and PR #2 decisions limiting what should and should not be
+  pre-documented.
+- PR #3 review decision D-B: do not write speculative divergence paragraphs
+  before behavior settles; keep the `SPEC.md` prohibition as the active
+  protection until this late doc lands.
+
+dependencies:
+
+- item: DMAT-009
+  type: integration
+  requires: daemon lifecycle and failure park are project-integrated
+  reason: daemon divergence text should describe implemented daemon behavior,
+  not planned behavior.
+- item: DMAT-010
+  type: integration
+  requires: maturity gate and regression advisory are project-integrated
+  reason: maturity divergence text should describe the implemented blocker gate
+  and rollout scope.
+- item: DMAT-011
+  type: sequencing
+  requires: real-use evidence is underway or complete, or an explicit blocker
+  records why it cannot run
+  reason: final divergence text should reflect fixes found by real use instead
+  of pre-use speculation.
+
+integration_pattern: none
+
+initial_labels:
+
+- Linear: `pink`
+- GitHub PR: `pink`, `symphony`
+
+required_actions:
+
+- Create root `DIVERGENCES.md` after daemon lifecycle and maturity-gate behavior
+  settles.
+- Include only implemented daemon/maturity divergence areas: daemon states and
+  timer-only wake semantics, titled workpad anchors, the daemon dispatch state
+  and per-state budget, the daemon lease flip and exhaustion park,
+  maturity-gated dependency dispatch, the blocker-gate state-scope rollout, and
+  the hardcoded `Todo` blocker gate replacement.
+- State that `SPEC.md` was intentionally left untouched for fork divergences
+  until this file existed.
+- Keep team-scoped dispatch, hook environment metadata,
+  one-orchestrator-per-team, `branch_name` behavior, `stack:*` override
+  semantics, and cookbook conventions out of `DIVERGENCES.md` unless they have
+  landed as durable fork behavior.
+
+acceptance_checks:
+
+- `DIVERGENCES.md` exists before project final acceptance and matches
+  implemented fork behavior.
+- The file contains no implementation TODOs, no unverified claims, no class
+  budget config, no `daemon_label`, and no out-of-phase items.
+- No fork divergence text was added to `SPEC.md`.
+- Targeted validation includes Markdown formatting for owned docs.
+
+split_criteria:
+
+- audience-conflict
+- historical-vs-current
+- workflow-boundary
+
+exclusions:
+
+- Do not implement daemon or maturity behavior.
+- Do not edit `SPEC.md`.
+- Do not create cookbook docs for conventions that have not landed.
+
 ## Completion Gates
 
+- Fan-out creates all eleven generated tickets in `Backlog`. No generated
+  ticket starts until a human promotes it out of `Backlog`.
+- The human promotion runbook has been followed or explicitly amended in the
+  relevant ticket workpads before project final acceptance.
 - `DMAT-001`, `DMAT-002`, `DMAT-003`, and `DMAT-004` are
   project-integrated or explicitly blocked with accepted human decisions before
-  implementation tickets leave `Backlog`.
-- `DMAT-005` is project-integrated before any behavior-divergence
-  implementation PR lands.
+  dependent implementation tickets are promoted.
 - Daemon wake-contract tests pass with fake clock, deterministic jitter,
   timer-only wake semantics, titled workpad anchors, blocked-daemon coverage,
   and no `issue.updatedAt` fallback.
@@ -1341,17 +1410,20 @@ exclusions:
 - Per-state concurrency tests prove daemon evaluations are capped by the daemon
   dispatch state through `agent.max_concurrent_agents_by_state`.
 - Maturity gate tests cover direct blocker labels, empty config terminal-only
-  behavior, depth 2, depth 3 composition, both gate call sites, daemon-blocker
-  warnings, and regression advisory comments.
+  behavior, default `maturity_gate_state_scope: ["todo"]`, explicit scope
+  widening, depth 2, depth 3 composition, both gate call sites,
+  daemon-blocker warnings, and regression advisory comments.
 - Tree-equality CI between fork `main` and the confirmed derived rebased branch
   is present and either passing or blocked only by an explicit human-owned
   branch-name/setup question.
-- `DIVERGENCES.md` and cookbook docs match implemented behavior and exclude
-  out-of-phase items.
-- A real Linear project sentinel demo records sleeping, timer wake, evaluation,
-  Happy/Unhappy verdicts, advisory comments, and project-completion predicate
-  evidence, or records the exact missing access/state setup blocker.
-- A real or accepted equivalent maturity DAG demo records early dispatch on
+- `DIVERGENCES.md` exists late, after behavior settles, and matches implemented
+  behavior without adding fork divergences to `SPEC.md`.
+- Cookbook docs match implemented behavior and exclude out-of-phase items.
+- Real Linear project use records sleeping, timer wake, evaluation,
+  Happy/Unhappy verdicts, advisory comments, project-completion predicate
+  evidence, fixes or reverts, and restart evidence, or records the exact
+  missing access/state setup blocker.
+- Real or human-accepted equivalent maturity DAG use records early dispatch on
   maturity and advisory-only regression behavior.
 - No project-scoped temporary markers, stubs, adapters, disabled paths,
   compatibility exports, or temporary flags remain unless a human explicitly
@@ -1362,7 +1434,7 @@ exclusions:
 | Decision                                                               | Current plan behavior                                                                                                                                                      | Owner or follow-up        |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | Exact derived rebased branch name for tree-equality CI                 | `DMAT-003` must confirm the branch name or stop with `Input Needed`; this plan does not invent one.                                                                        | Human lead or `DMAT-003`. |
-| Real Linear project/team for the sentinel and maturity smoke demos     | `DMAT-011` may use a temporary project only when required states, labels, and permissions are available or human-approved; otherwise it records missing-access proof.      | Human lead or `DMAT-011`. |
+| Real Linear project/team for sentinel and maturity real-use evidence   | `DMAT-011` must use a human-approved real project with required states, labels, and permissions available; otherwise it records missing-access proof.                      | Human lead or `DMAT-011`. |
 | Phase-2 `stack:*` override semantics                                   | Not fanned out. Unknown or experimental stack labels must not widen phase-1 eligibility.                                                                                   | Later enhancement.        |
 | Check-back-later one-shot timed waits for non-daemon tickets           | Not fanned out. Phase 1 preserves extension points without implementing one-shot wait behavior.                                                                            | Later enhancement.        |
 | Writer-side comment convention and orphan cleanup                      | Not fanned out as fork engine work. The fork consumes titled comments and degrades safely; writer upsert protocol belongs to operator workflow/agent convention ownership. | Later workflow project.   |
@@ -1374,21 +1446,23 @@ state setup or Linear permissions are unavailable.
 
 ## Dry-Run Ticket Payload Expectations
 
-A no-write dry run from this plan should produce eleven new ticket payloads:
+A no-write dry run from this plan should produce eleven new `Backlog` ticket
+payloads. Nothing starts until a human promotes a generated ticket out of
+`Backlog`.
 
 | Item                                                                             | Initial status | Linear labels | GitHub PR labels   |
 | -------------------------------------------------------------------------------- | -------------- | ------------- | ------------------ |
-| DMAT-001 Verify daemon comment metadata, wake-label, and blocker fetch mechanics | Todo           | `pink`        | `pink`, `symphony` |
-| DMAT-002 Verify current SPEC.md and retry-exhaustion facts                       | Todo           | `pink`        | `pink`, `symphony` |
-| DMAT-003 Add tree-equality CI for fork main and derived rebased branch           | Todo           | `pink`        | `pink`, `symphony` |
-| DMAT-004 Verify maturity relation, label, and custom state mechanics             | Todo           | `pink`        | `pink`, `symphony` |
-| DMAT-005 Create early DIVERGENCES.md runway for daemon maturity                  | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-001 Verify daemon comment metadata, wake-label, and blocker fetch mechanics | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-002 Verify current SPEC.md and retry-exhaustion facts                       | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-003 Add tree-equality CI for fork main and derived rebased branch           | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-004 Verify maturity relation, label, and custom state mechanics             | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-006 Add daemon and maturity config plus normalized data runway              | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-007 Implement timer-only daemon wake engine with fake-clock tests           | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-008 Add Linear comment read and commentUpdate support for daemon workpads   | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-009 Wire daemon dispatch state, lease, and failure-exhaustion park          | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-010 Implement direct-blocker maturity gate and regression advisory          | Backlog        | `pink`        | `pink`, `symphony` |
-| DMAT-011 Document cookbook conventions and demonstrate daemon maturity behavior  | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-011 Document cookbook conventions and verify daemon maturity by real use    | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-005 Create DIVERGENCES.md after daemon maturity behavior settles            | Backlog        | `pink`        | `pink`, `symphony` |
 
 Each generated ticket payload must include:
 
