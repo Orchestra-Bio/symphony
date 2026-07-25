@@ -67,7 +67,7 @@ document as the dereferenceable public record of those sources.
   existing tests in `elixir/test/symphony_elixir/*`.
 - `D9`: GitHub PR #2 human review and handoff comments from 2026-07-25. These
   supersede earlier handoff text for daemon wake prods, daemon dispatch state,
-  comment anchoring, and recurring-work concurrency.
+  comment anchoring, one-shot wait breadth, and recurring-work concurrency.
 - `D10`: GitHub PR #3 human review, decision comments D-A/D-B/D-C, and approval
   review from 2026-07-25. These supersede earlier handoff and requirements text
   for fan-out promotion state, late `DIVERGENCES.md` timing, real-use evidence,
@@ -369,10 +369,13 @@ timed waits for non-daemon tickets. Preserve these extension points:
   to ordinary active work and disarm without a daemon verdict;
 - never use `issue.updatedAt` as a fallback anchor.
 
-A later one-shot wait feature must also address breadth: `Inactive` contains far
-more tickets than daemon states, so comment reads must be label-gated or event
-bridged to stay proportional. Timed waits are a fallback for cases with no real
-event source, not a substitute for a bridge where an event exists. [D9]
+A later one-shot wait feature should keep the label-gated selection shape, but
+not because `Inactive` breadth makes the query expensive: PR #2 review retracted
+that breadth argument after verification showed a state-and-label poll remains a
+single bounded Linear query. The useful bound is per-ticket comment volume,
+which is controlled by writers rather than elapsed wait time. Timed waits are a
+fallback for cases with no real event source, not a substitute for a bridge
+where an event exists. [D9]
 
 ### Lease At Dispatch
 

@@ -57,9 +57,10 @@ Authoritative project sources:
   These are the rework source for initial ticket state, manual promotion order,
   late `DIVERGENCES.md` content, maturity-gate rollout scope, and real-use
   validation.
-- Linear issue `ABC-296` / `DMAT-014` from 2026-07-25. This is the replan
-  source that folds PR decisions, ticket cancellations, and manually added
-  tickets back into the canonical requirements, design, and plan.
+- Linear issue `ABC-296` / `DMAT-014` from 2026-07-25, including the "Two
+  additions - do not split this ticket" comment and PR #9 rework review. This is
+  the replan source that folds PR decisions, ticket cancellations, and manually
+  added tickets back into the canonical requirements, design, and plan.
 - Linear issue `ABC-283` / `DMAT-003` cancellation comment from 2026-07-25.
   This cancels tree-equality CI as premature while retaining the fork `main`
   true-merge constraint.
@@ -147,6 +148,18 @@ Unavailable sources: none.
   automated frontier. The current ticket set removes canceled `DMAT-003` and
   adds human-decided `DMAT-012` and `DMAT-013`, so this plan now tracks twelve
   non-replan `DMAT-*` items.
+- Replanning is scoped to DAG shape and ticket creation: it may add, remove, and
+  re-edge nodes, but it does not rewrite what an existing node means. Changing a
+  ticket's scope belongs to that ticket; requirements and design drift is
+  ordinary documentation work, not replanning. This ABC-296 / PR #9 human
+  decision keeps later daemon-owned replanning mechanical because DAGs can be
+  diffed and prose requirement sets cannot.
+- This project has no Mermaid DAG and no Linear blocker relations because the
+  frontier machinery is itself the deliverable. For `daemon-maturity`, the DAG
+  is the promotion runbook, so replanning it means editing the ordered list;
+  DAG-shaped replanning starts with the next project. A future replanning daemon
+  creates tickets and should reuse ABC-233's acceptance gate for live writes
+  instead of inventing another gate.
 - PR #3 review decision D-B supersedes the early-file timing in R16 for this
   plan: `DIVERGENCES.md` content lands late, beside cookbook and real-use
   evidence, after daemon and maturity behavior has settled. Until then, the
