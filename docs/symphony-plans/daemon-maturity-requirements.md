@@ -89,6 +89,10 @@ Local workflow and review sources:
   are the human-decision source for landing this document in the fork, shrinking
   phase-1 stack override scope, `max_stack_depth`, and class-based concurrency
   budgets.
+- GitHub PR #2 human review and handoff comments on 2026-07-25. These comments
+  supersede the earlier handoffs for daemon wake prods, daemon dispatch state,
+  comment anchoring, and recurring-work concurrency. They are the
+  human-decision source for the amendments to R2, R5, and R19.
 
 Repo context:
 
@@ -120,6 +124,7 @@ handoffs.
 - `S10`: Target fork repo context at
   `45a53b8588a9650c2f424cb31a6495af1bc86727`.
 - `S11`: GitHub PR #1 human review and decision comments from 2026-07-25.
+- `S12`: GitHub PR #2 human review and handoff comments from 2026-07-25.
 
 ## Goal
 
@@ -130,8 +135,10 @@ spec-first, reviewable, and compatible with later upstream adoption discussions.
 [S2, S3, S4, S5]
 
 Daemon tickets add the clock: dispatch eligibility becomes `f(snapshot, now)`.
-They sleep, wake on timer or prod, evaluate the world idempotently, land in
-Happy or Unhappy verdict states, and prod something when Unhappy. [S3, S4, S6]
+They sleep, wake on timer, evaluate the world idempotently, land in Happy or
+Unhappy verdict states, and leave ordinary comments when something else needs
+attention. Urgent wake is a state write to the daemon dispatch state, not a
+comment-triggered wake. [S3, S4, S6, S12]
 
 Maturity-gated dependencies add upstream maturity: blocked depth-2-and-deeper
 DAG tickets can dispatch when their direct blockers carry a configured maturity
@@ -151,7 +158,8 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
   product requirements. [S1, S2]
 - Human lead for unresolved product decisions: Jeremy Carroll. [S1, S2]
 - The handoff documents are settled decisions unless a listed verification
-  fails. Design work should not relitigate them. [S1, S3, S4, S5, S6]
+  fails or a later human decision explicitly supersedes them. [S1, S3, S4, S5,
+  S6, S12]
 
 ## Non-Goals
 
@@ -199,15 +207,17 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 Add a configured daemon state class alongside active and terminal states. Under
 the minimal state model, the daemon resting states are Happy and Unhappy. A
 daemon-state ticket is not dispatched through the normal active-ticket path
-until it wakes and is flipped to Active. [S3, S4, S6]
+until it wakes and is flipped to the configured daemon dispatch state, which is
+also listed in `tracker.active_states`. [S3, S4, S6, S12]
 
 ### R2. Daemon Wake Eligibility
 
-A daemon wakes when either its timer is due or it receives a prod. The timer is
-computed from the latest verdict comment time, the `wake:*` cadence label, and
-jitter. A prod is any comment newer than the latest verdict comment. Wake reason
-is advisory only; evaluation must re-read the world at evaluation time. [S3,
-S4, S6]
+A daemon wakes when its timer is due. The timer is computed from the daemon's
+own titled workpad comment `updatedAt`, the `wake:*` cadence label, and jitter.
+Comments never cause wake eligibility; comments left while a daemon sleeps are
+informational deposits for the next scheduled evaluation. Urgency is expressed
+by moving the daemon ticket to the daemon dispatch state. Evaluation must
+re-read the world at evaluation time. [S3, S4, S6, S12]
 
 ### R3. Daemon Restart Tolerance And Jitter
 
@@ -224,16 +234,19 @@ S6, S11]
 Daemon cadence is represented by a `wake:*` label. Required supported labels are
 `wake:15m`, `wake:1h`, `wake:4h`, and `wake:1d`; absent, unknown, or
 unparseable cadence labels use the workflow default and must never mean
-wake-now. Last evaluation is the `createdAt` of the latest exact
-sentinel-headed daemon verdict comment, not comment authorship. [S3, S4, S6]
+wake-now. Last evaluation is anchored by the server-written `updatedAt` of the
+daemon's own titled workpad comment. The writer identity is the comment's
+leading heading line, not the Linear author, because multiple agents can share
+one bot identity. [S3, S4, S6, S12]
 
 ### R5. Daemon Evaluation Contract
 
-Daemon evaluation must be idempotent and at least once. Multiple prods while
-asleep coalesce into one evaluation that reads all pending input. The agent exit
-contract must write a sentinel-headed verdict comment and place the daemon in
-Happy or Unhappy with a future wake time implied by the verdict time and
-cadence. [S3, S4, S6]
+Daemon evaluation must be idempotent and at least once. Comments accumulated
+while asleep are read during the next scheduled evaluation, not used as wake
+signals. The agent exit contract must edit the daemon's own titled workpad
+comment with verdict, reason, evidence, and a bounded rolling history, then place
+the daemon in Happy or Unhappy with a future wake time implied by the comment
+`updatedAt` and cadence. [S3, S4, S6, S12]
 
 ### R6. Blocked Daemons
 
@@ -245,17 +258,19 @@ a real blocker for another ticket. [S3, S4, S5, S6]
 ### R7. Daemon Lease At Dispatch
 
 When a poll decides to wake a daemon, the orchestrator's precondition of
-dispatch is the flip to Active. An Active daemon is not wake-eligible; if the
-evaluation crashes, normal active-ticket dispatch re-dispatches it and the
-idempotent evaluator re-derives the verdict. [S3, S4, S6]
+dispatch is the flip to the daemon dispatch state. A daemon in that dispatch
+state is not wake-eligible; if the evaluation crashes, normal active-ticket
+dispatch re-dispatches it and the idempotent evaluator re-derives the verdict.
+[S3, S4, S6, S12]
 
 ### R8. Daemon Failure Handling
 
 Daemon evaluation failures use normal worker retry and backoff. On retry
-exhaustion, the orchestrator must park the daemon back to Unhappy and post an
-orchestrator-authored sentinel verdict comment marked unevaluated. This resets
-the wake clock to the next interval and prevents hot loops or stranded Active
-daemons. [S3, S4, S6]
+exhaustion, the orchestrator must park the daemon back to Unhappy and update its
+own titled workpad comment with an unevaluated verdict. This resets the wake
+clock to the next interval and prevents hot loops or stranded dispatch-state
+daemons. A later real daemon verdict supersedes an exhaustion park. [S3, S4, S6,
+S12]
 
 ### R9. Project Completion Sentinel Demo
 
@@ -308,30 +323,32 @@ eligibility before the maturity gate says the ticket is ready. [S5, S11]
 ### R14. Maturity Regression Behavior
 
 If a blocker loses its maturity label after a dependent has dispatched, the
-orchestrator must not kill the dependent's worker. It should prod the dependent
-with a comment once per observed transition and let the dependent's agent
-decide whether to pause, rework, or continue. If the dependent has not
-dispatched, it simply stops being eligible. [S3, S5]
+orchestrator must not kill the dependent's worker. It should leave an advisory
+comment on the dependent once per observed transition and let the dependent's
+agent decide whether to pause, rework, or continue. If the dependent has not
+dispatched, it simply stops being eligible. [S3, S5, S12]
 
 ### R15. Daemon Blockers In Maturity Gate
 
 Daemon-state blockers are ignored by the maturity gate with a warning because a
 daemon never completes or matures. A dependency edge from a daemon is a plan bug;
-daemons express dissatisfaction by prodding normal tickets instead. [S4, S5,
-S6]
+daemons express dissatisfaction by leaving ordinary comments on normal tickets
+instead. [S4, S5, S6, S12]
 
 ### R16. Divergences And Documentation
 
 Create `DIVERGENCES.md` early, before the first implementation divergence needs
-to land. For this project, the initial divergence list must cover daemon states
-and wake semantics, the orchestrator dispatch flip and exhaustion park,
-maturity-gated dependency dispatch, and class-based concurrency budgets. The
-divergence list should grow only when a requirement or implementation ticket
-establishes the behavior; do not pre-document team-scoped dispatch, hook
-environment metadata, one-orchestrator-per-team, or `branch_name` behavior from
-this requirements ticket alone. Cookbook material must cover the project
-sentinel pattern, repo neutrality, and multi-repo workspaces when those
-conventions are actually introduced. [S3, S4, S5, S11]
+to land. For this project, the divergence list must cover daemon states and
+timer-only wake semantics, the extra daemon dispatch state, the orchestrator
+dispatch flip and exhaustion park, maturity-gated dependency dispatch, the
+hardcoded `Todo` blocker-gate replacement, and per-state daemon dispatch
+budgeting. The divergence list should grow only when a requirement or
+implementation ticket establishes the behavior; do not pre-document
+team-scoped dispatch, hook environment metadata, one-orchestrator-per-team, or
+`branch_name` behavior from this requirements ticket alone. Cookbook material
+must cover the project sentinel pattern, repo neutrality, and multi-repo
+workspaces when those conventions are actually introduced. [S3, S4, S5, S11,
+S12]
 
 ### R17. Verification-First Implementation
 
@@ -348,19 +365,14 @@ location, result, known limitations, and next handoff. Local unit tests are not
 enough for the project-completion sentinel or tree-equality branch strategy;
 those need observable workflow or CI evidence. [S1, S7]
 
-### R19. Class-Based Concurrency Budgets
+### R19. Recurring-Work Concurrency Budget
 
-`max_concurrent_agents` must be budgeted by configured state class. Each
-non-implementation class carries an optional ceiling, defaulting to 50% of the
-cap rounded down, and an optional floor. Implementation-class work may
-consume any slot not held by a class floor. Ceilings are evaluated per tick from
-the snapshot alongside the existing priority, `created_at`, and identifier sort,
-which continues to order work within a class. The status surface must report
-occupancy per class. [S11]
-
-This is engine behavior, not cookbook guidance. It needs a `DIVERGENCES.md`
-paragraph. Tests should use deterministic synthetic candidate lists plus a class
-map and cap to assert the expected dispatch set. [S11]
+Recurring work must not be able to occupy the whole dispatch pool while
+implementation work is eligible. This is satisfied by configuration rather than
+new engine behavior: daemon evaluations run in a dedicated dispatch state, and
+`agent.max_concurrent_agents_by_state` caps that state. Ceilings only; no
+reserved floors for recurring work. Status reporting is per-state running
+counts, using the status surface that already reports running work. [S12]
 
 ## Verification Backlog And Open Questions
 
@@ -383,11 +395,15 @@ map and cap to assert the expected dispatch set. [S11]
   upstream TODOs. Owner: `daemon-maturity` design/fan-out follow-up under Jeremy
   Carroll. Follow-up: create a verification ticket before implementation
   tickets that depend on upstream spec facts. [S3, S4]
-- **Daemon wake comment and label fetch mechanics.** Verify comment fetch cost,
-  `createdAt` ordering, `wake:*` label visibility, and blocking-relation
-  visibility in the normalized issue model. Owner: daemon wake verification
-  follow-up under Jeremy Carroll. Follow-up: verify the Linear fetch path before
-  implementing wake eligibility or Linear binding. [S3, S4, S6]
+- **Daemon wake comment and label fetch mechanics.** Verify the normalized
+  comment fetch shape for `id`, `createdAt`, and `updatedAt`, the narrow body
+  fetch needed to identify titled workpad comments when a new comment id
+  appears, `wake:*` label visibility, and blocking-relation visibility in the
+  normalized issue model. `Comment.updatedAt` itself is already verified on
+  project workpads; do not re-open that platform fact. Owner: daemon wake
+  verification follow-up under Jeremy Carroll. Follow-up: verify the Linear
+  fetch path before implementing wake eligibility or Linear binding. [S3, S4,
+  S6, S12]
 - **Maturity gate relation direction and label visibility.** Verify blocks
   versus blocked-by direction, labels on blocked or non-candidate tickets, and
   label-change visibility in snapshot deltas. This verification is scoped to
@@ -407,36 +423,25 @@ map and cap to assert the expected dispatch set. [S11]
   review" means AI review, human review, or another maturity signal. Owner:
   human lead Jeremy Carroll. Follow-up: later enhancement ticket; not phase-1
   scope. [S5, S11]
-- **R19 percent or absolute budgets.** Decide whether class budgets are
-  configured as percentages of `max_concurrent_agents` or absolute counts. If
-  absolute, validation must reject class floors whose sum exceeds the cap.
-  Owner: human lead Jeremy Carroll. Follow-up: resolve in the design ticket
-  before implementation. [S11]
-- **R19 urgent escape hatch.** Decide whether urgent recurring work can exceed a
-  class ceiling. Recommendation from the human review is not to add the escape
-  hatch unless a real case appears. Owner: human lead Jeremy Carroll. Follow-up:
-  resolve in the design ticket before implementation. [S11]
-- **R19 sequencing.** Decide whether class-based budgets ship with daemon work
-  or earlier. If GitHub-to-Linear bridges remove CI-polling occupancy first, the
-  permanent motivation is daemon recurrence rather than CI polling. Owner: human
-  lead Jeremy Carroll. Follow-up: resolve ordering in project planning; R19
-  remains in project scope. [S11]
 
 ## Project Done Predicate
 
 The `daemon-maturity` project is done only when all of the following are true:
 
 - A project-completion sentinel daemon runs against a real Linear project and
-  observably sleeps, wakes, evaluates, and prods when Unhappy. [S3, S4]
+  observably sleeps, wakes by timer, evaluates, and leaves advisory comments
+  when Unhappy. [S3, S4, S12]
 - Daemon wake-contract tests pass with synthetic snapshots, a fake clock, seeded
   jitter, and blocked-daemon coverage. [S3, S4, S6]
 - Daemon Linear-binding tests prove absent, unknown, or unparseable `wake:*`
   cadence labels never mean wake-now. [S3, S4, S6, S11]
 - Lease and restart-recovery tests pass: kill during sleep re-evaluates within
   the accepted restart tolerance, and kill during evaluation re-dispatches the
-  Active daemon so the verdict is re-derived. [S4, S6, S11]
+  daemon-dispatch-state ticket so the verdict is re-derived. [S4, S6, S11,
+  S12]
 - Failure handling proves retry exhaustion parks the daemon back to Unhappy,
-  writes an unevaluated sentinel verdict, and avoids hot looping. [S3, S4, S6]
+  writes an unevaluated orchestrator workpad verdict, and avoids hot looping.
+  [S3, S4, S6, S12]
 - A depth-2 chain dispatches early when its blocker gains the maturity label,
   and the dependent survives blocker maturity regression without killing the
   worker. [S3, S5]
@@ -444,8 +449,9 @@ The `daemon-maturity` project is done only when all of the following are true:
   orchestrator gate, without transitive depth checks. [S3, S5, S11]
 - Phase-1 maturity-gate tests prove unknown or experimental stack labels do not
   make a dependent eligible before the maturity gate is satisfied. [S5, S11]
-- Class-based concurrency budget tests prove recurring classes cannot occupy
-  the whole dispatch pool while implementation work is eligible. [S11]
+- Per-state concurrency budget tests prove daemon evaluations are capped by the
+  configured daemon dispatch state and cannot occupy the whole dispatch pool
+  while implementation work is eligible. [S12]
 - `DIVERGENCES.md` exists before the first implementation divergence lands and
   contains the divergence paragraphs required by completed implementation work.
   [S3, S4, S5, S11]
