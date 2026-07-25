@@ -22,8 +22,8 @@ are recorded here as requirements or constraints. Open verifications are
 requirements for follow-up work, not optional research.
 
 The three design handoffs cited below are internal Orchestra documents. Public
-readers may not be able to open those Google Docs; this file is the public
-record of the requirements those handoffs settled.
+readers cannot open those Google Docs; this file is the public record of the
+requirements those handoffs settled.
 
 ## Source Inputs Read
 
@@ -278,9 +278,13 @@ terminal-only behavior. Daemon-state blockers are the exception handled by R15.
 
 Frontier tickets with no incomplete blockers continue to dispatch as normal PRs
 over `main`. Depth-2-and-deeper tickets may dispatch as stacked work when their
-direct blockers reach maturity. The rule is edge-local and composes to deeper
-DAGs, but phase 1 must respect `max_stack_depth` with default `3` so the agent
-fleet cannot run arbitrarily far ahead of human review capacity. [S3, S5, S11]
+direct blockers reach maturity. The orchestrator gate is edge-local,
+depth-agnostic, and composes to deeper DAGs without walking transitive blocker
+chains. `max_stack_depth`, default `3`, is a plan-side constraint: the plan that
+emits the DAG is responsible for not drawing dependency chains deeper than the
+cap because the cap protects human review capacity. A chain beyond the cap is a
+plan bug, and the orchestrator must not compensate for it or police it in the
+engine. [S3, S5, S11]
 
 ### R12. Maturity Signal External Dependency
 
@@ -321,13 +325,13 @@ S6]
 Create `DIVERGENCES.md` early, before the first implementation divergence needs
 to land. For this project, the initial divergence list must cover daemon states
 and wake semantics, the orchestrator dispatch flip and exhaustion park,
-maturity-gated dependency dispatch, and class-based concurrency budgets if R19
-is implemented. The divergence list should grow only when a requirement or
-implementation ticket establishes the behavior; do not pre-document
-team-scoped dispatch, hook environment metadata, one-orchestrator-per-team, or
-`branch_name` behavior from this requirements ticket alone. Cookbook material
-must cover the project sentinel pattern, repo neutrality, and multi-repo
-workspaces when those conventions are actually introduced. [S3, S4, S5, S11]
+maturity-gated dependency dispatch, and class-based concurrency budgets. The
+divergence list should grow only when a requirement or implementation ticket
+establishes the behavior; do not pre-document team-scoped dispatch, hook
+environment metadata, one-orchestrator-per-team, or `branch_name` behavior from
+this requirements ticket alone. Cookbook material must cover the project
+sentinel pattern, repo neutrality, and multi-repo workspaces when those
+conventions are actually introduced. [S3, S4, S5, S11]
 
 ### R17. Verification-First Implementation
 
@@ -348,23 +352,24 @@ those need observable workflow or CI evidence. [S1, S7]
 
 `max_concurrent_agents` must be budgeted by configured state class. Each
 non-implementation class carries an optional ceiling, defaulting to 50% of the
-cap with a floor applied, and an optional floor. Implementation-class work may
+cap rounded down, and an optional floor. Implementation-class work may
 consume any slot not held by a class floor. Ceilings are evaluated per tick from
 the snapshot alongside the existing priority, `created_at`, and identifier sort,
 which continues to order work within a class. The status surface must report
 occupancy per class. [S11]
 
 This is engine behavior, not cookbook guidance. It needs a `DIVERGENCES.md`
-paragraph if implemented. Tests should use deterministic synthetic candidate
-lists plus a class map and cap to assert the expected dispatch set. [S11]
+paragraph. Tests should use deterministic synthetic candidate lists plus a class
+map and cap to assert the expected dispatch set. [S11]
 
 ## Verification Backlog And Open Questions
 
 ### Answered Planning Input
 
 - **Maturity gate evaluation location.** The 2026-07-25 human review identifies
-  the candidate fetch, dispatch ordering path, config validation, and
-  GraphQL-function injection pattern as the code areas to harvest from the
+  the candidate fetch in `Linear.Client.fetch_candidate_issues/0`, dispatch
+  ordering in `Orchestrator.sort_issues_for_dispatch/1`, config validation, and
+  the GraphQL-function injection pattern as the code areas to harvest from the
   related `jeremycarroll/symphony` `codex/deprioritize-ci-polling` branch. Treat
   this as answered planning input for where the gate belongs; implementation
   still needs ordinary current-branch code reading before edits. Owner: design
@@ -385,9 +390,11 @@ lists plus a class map and cap to assert the expected dispatch set. [S11]
   implementing wake eligibility or Linear binding. [S3, S4, S6]
 - **Maturity gate relation direction and label visibility.** Verify blocks
   versus blocked-by direction, labels on blocked or non-candidate tickets, and
-  label-change visibility in snapshot deltas. Owner: maturity gate verification
-  follow-up under Jeremy Carroll. Follow-up: verify relation and label mechanics
-  before implementing `maturity_labels` or regression prod behavior. [S3, S5]
+  label-change visibility in snapshot deltas. This verification is scoped to
+  direct blockers; the plan-side depth cap does not widen it to transitive depth
+  visibility. Owner: maturity gate verification follow-up under Jeremy Carroll.
+  Follow-up: verify relation and label mechanics before implementing
+  `maturity_labels` or regression prod behavior. [S3, S5, S11]
 - **Tree-equality CI between fork `main` and the derived rebased branch.** Verify
   that the CI job fails loudly on drift. Owner: repo strategy and CI follow-up
   under Jeremy Carroll. Follow-up: create the rebased branch contract and CI
@@ -412,7 +419,8 @@ lists plus a class map and cap to assert the expected dispatch set. [S11]
 - **R19 sequencing.** Decide whether class-based budgets ship with daemon work
   or earlier. If GitHub-to-Linear bridges remove CI-polling occupancy first, the
   permanent motivation is daemon recurrence rather than CI polling. Owner: human
-  lead Jeremy Carroll. Follow-up: resolve in project planning. [S11]
+  lead Jeremy Carroll. Follow-up: resolve ordering in project planning; R19
+  remains in project scope. [S11]
 
 ## Project Done Predicate
 
@@ -433,7 +441,7 @@ The `daemon-maturity` project is done only when all of the following are true:
   and the dependent survives blocker maturity regression without killing the
   worker. [S3, S5]
 - Depth-3 synthetic coverage shows edge-local maturity composition within the
-  `max_stack_depth` default. [S3, S5, S11]
+  orchestrator gate, without transitive depth checks. [S3, S5, S11]
 - Phase-1 maturity-gate tests prove unknown or experimental stack labels do not
   make a dependent eligible before the maturity gate is satisfied. [S5, S11]
 - Class-based concurrency budget tests prove recurring classes cannot occupy
