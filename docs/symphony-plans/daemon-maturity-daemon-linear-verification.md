@@ -11,8 +11,9 @@ verification_date: 2026-07-25
 
 This document verifies the Linear data path required before daemon wake
 eligibility and Linear binding implementation rely on it. It covers comment
-metadata reads, narrow comment body reads, wake-label visibility, direct blocker
-relation visibility, and `commentUpdate` schema availability.
+metadata reads, the poll-shaped candidate query with nested comment metadata,
+narrow comment body reads, wake-label visibility, direct blocker relation
+visibility, and `commentUpdate` schema availability.
 
 No daemon wake eligibility, orchestrator dispatch behavior, daemon comments, or
 daemon target comment edits were implemented. No Linear blocker relations were
@@ -58,6 +59,10 @@ not rely on that as a platform retest.
     `https://github.com/Orchestra-Bio/symphony/pull/3#issuecomment-5079172210`,
     and
     `https://github.com/Orchestra-Bio/symphony/pull/3#pullrequestreview-4779606397`.
+- PR #5 rework review:
+  `https://github.com/Orchestra-Bio/symphony/pull/5#pullrequestreview-4779750427`
+  requested the poll-shaped comment metadata query and explicit validation
+  record added here.
 - Current code:
   - `elixir/lib/symphony_elixir/linear/client.ex`
   - `elixir/lib/symphony_elixir/linear/issue.ex`
@@ -84,6 +89,10 @@ verified first.
 - Live issue/comment target: `ABC-281`, comment
   `f1e4bc22-a42d-4a70-a3e8-44215ea6bf8f`, created as this ticket's
   `## Codex Workpad`.
+- Live poll-shaped target: the `daemon-maturity` Linear project, using the
+  configured poll-style state set `Todo`, `In Progress`, `Merging`, and
+  `Rework`; the current candidate set returned `ABC-296`, `ABC-284`,
+  `ABC-281`, and `ABC-282`.
 - Live blocker relation target: `ABC-247`, which has an `inverseRelations`
   `blocks` edge to blocker `ABC-246`.
 - Wake-label fixture: current `labels.nodes.name` shape plus code inspection of
@@ -96,6 +105,7 @@ verified first.
 | Check                                           | Target                                  | Result               | Notes                                                                                                       |
 | ----------------------------------------------- | --------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Comment metadata `id`, `createdAt`, `updatedAt` | Live `ABC-281` workpad comment          | Pass                 | Raw Linear shape is available; current code still needs normalization work.                                 |
+| Poll-shaped comment metadata                    | Live daemon-maturity candidate poll     | Pass                 | `issues(filter:)` with nested `comments(first: 20)` succeeded at current client page bounds.                |
 | Narrow body fetch by comment id                 | Live `ABC-281` workpad comment          | Pass                 | Body is fetched only by id, not in steady-state polling.                                                    |
 | Wake-label visibility                           | Live issue-label path plus fixture      | Pass with setup note | ABC team does not yet define the four wake labels. The GraphQL path and current normalizer preserve labels. |
 | Blocker relation visibility                     | Live `ABC-247` blocked by `ABC-246`     | Pass                 | `inverseRelations(type: blocks)` exposes blocker id, identifier, state, and labels.                         |
@@ -164,6 +174,228 @@ Cost notes:
 
 Result: pass for Linear field availability. Current code still needs a
 normalized comment-ref shape in a later implementation ticket.
+
+## Poll-Shaped Comment Metadata
+
+Exact selection:
+
+```graphql
+query PollShapedCommentMetadata(
+  $projectSlug: String!
+  $stateNames: [String!]!
+  $first: Int!
+  $relationFirst: Int!
+  $commentFirst: Int!
+) {
+  issues(
+    filter: {
+      project: { slugId: { eq: $projectSlug } }
+      state: { name: { in: $stateNames } }
+    }
+    first: $first
+  ) {
+    nodes {
+      id
+      identifier
+      state {
+        name
+      }
+      labels {
+        nodes {
+          name
+        }
+      }
+      inverseRelations(first: $relationFirst) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state {
+              name
+            }
+          }
+        }
+      }
+      comments(first: $commentFirst) {
+        nodes {
+          id
+          createdAt
+          updatedAt
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+```
+
+Variables:
+
+```json
+{
+  "projectSlug": "daemon-tickets-maturity-gated-dependencies-symphony-fork-1966c5cbbf8f",
+  "stateNames": ["Todo", "In Progress", "Merging", "Rework"],
+  "first": 50,
+  "relationFirst": 50,
+  "commentFirst": 20
+}
+```
+
+Observed response shape:
+
+```json
+{
+  "issues": {
+    "nodes": [
+      {
+        "id": "455ed51b-932c-4468-88a3-195cf80d7cd8",
+        "identifier": "ABC-296",
+        "state": { "name": "In Progress" },
+        "labels": { "nodes": [{ "name": "pink" }] },
+        "inverseRelations": { "nodes": [] },
+        "comments": {
+          "nodes": [
+            {
+              "id": "3ac48320-971b-4edc-b8e4-a35afad7d0ec",
+              "createdAt": "2026-07-25T17:26:23.224Z",
+              "updatedAt": "2026-07-25T17:26:23.168Z"
+            },
+            {
+              "id": "c6b1eac2-f3f2-47a2-bd6b-80a5d13f4619",
+              "createdAt": "2026-07-25T17:24:48.672Z",
+              "updatedAt": "2026-07-25T17:24:48.655Z"
+            }
+          ]
+        }
+      },
+      {
+        "id": "71cf49a2-cb62-40ac-a47c-4885da85c8c4",
+        "identifier": "ABC-284",
+        "state": { "name": "Rework" },
+        "labels": { "nodes": [{ "name": "pink" }] },
+        "inverseRelations": {
+          "nodes": [
+            {
+              "type": "related",
+              "issue": {
+                "id": "a2cd0889-4924-4793-b7fb-af541817924c",
+                "identifier": "ABC-287",
+                "state": { "name": "Backlog" }
+              }
+            },
+            {
+              "type": "related",
+              "issue": {
+                "id": "57587fba-38fc-4328-99d8-bc934f19c477",
+                "identifier": "ABC-295",
+                "state": { "name": "Waiting for CI" }
+              }
+            }
+          ]
+        },
+        "comments": {
+          "nodes": [
+            {
+              "id": "55901f8d-14b9-49df-a1e4-488f04c3a7dd",
+              "createdAt": "2026-07-25T16:47:10.234Z",
+              "updatedAt": "2026-07-25T16:54:25.536Z"
+            }
+          ]
+        }
+      },
+      {
+        "id": "38c7ef75-b1f1-4f8c-aa51-c18ea09b082f",
+        "identifier": "ABC-281",
+        "state": { "name": "Rework" },
+        "labels": { "nodes": [{ "name": "pink" }] },
+        "inverseRelations": {
+          "nodes": [
+            {
+              "type": "related",
+              "issue": {
+                "id": "a2cd0889-4924-4793-b7fb-af541817924c",
+                "identifier": "ABC-287",
+                "state": { "name": "Backlog" }
+              }
+            },
+            {
+              "type": "related",
+              "issue": {
+                "id": "57587fba-38fc-4328-99d8-bc934f19c477",
+                "identifier": "ABC-295",
+                "state": { "name": "Waiting for CI" }
+              }
+            }
+          ]
+        },
+        "comments": {
+          "nodes": [
+            {
+              "id": "f1e4bc22-a42d-4a70-a3e8-44215ea6bf8f",
+              "createdAt": "2026-07-25T16:37:19.692Z",
+              "updatedAt": "2026-07-25T16:45:57.073Z"
+            }
+          ]
+        }
+      },
+      {
+        "id": "33669732-0c60-4dbf-8d70-95dc292cd383",
+        "identifier": "ABC-282",
+        "state": { "name": "Rework" },
+        "labels": { "nodes": [{ "name": "pink" }] },
+        "inverseRelations": {
+          "nodes": [
+            {
+              "type": "related",
+              "issue": {
+                "id": "455ed51b-932c-4468-88a3-195cf80d7cd8",
+                "identifier": "ABC-296",
+                "state": { "name": "In Progress" }
+              }
+            }
+          ]
+        },
+        "comments": {
+          "nodes": [
+            {
+              "id": "5a4be83d-fbea-497c-9a20-6810fde3f5cc",
+              "createdAt": "2026-07-25T16:38:45.001Z",
+              "updatedAt": "2026-07-25T16:45:59.851Z"
+            }
+          ]
+        }
+      }
+    ],
+    "pageInfo": {
+      "endCursor": "33669732-0c60-4dbf-8d70-95dc292cd383",
+      "hasNextPage": false
+    }
+  }
+}
+```
+
+Cost notes:
+
+- This poll-shaped query is the shape DMAT-008 is expected to extend. It
+  returns candidate nodes through `issues(filter: ...)`, with comment metadata
+  nested under each candidate node.
+- The selection used the current client issue/relation page bound of `50` and a
+  bounded comment page of `20`; the live daemon-maturity candidate set returned
+  4 issues and 5 comment metadata nodes total with `hasNextPage: false`.
+- The configured example poll interval in `elixir/WORKFLOW.md` is `5000ms`.
+  At these page bounds, the added comment metadata branch is bounded at 1,000
+  comment metadata nodes per 50-issue page and does not fetch `body`.
+- The query returned without GraphQL errors or Linear complexity-budget
+  rejection. The injected `linear_graphql` tool did not expose a numeric query
+  cost extension or HTTP cost header.
+
+Result: pass for the live poll-shaped candidate query at current page bounds.
+DMAT-008 should keep `comments(first:)` bounded and keep comment `body` on the
+narrow id lookup path.
 
 ## Narrow Body Fetch
 
@@ -533,10 +765,21 @@ Result: pass.
 
 - No missing Linear GraphQL field was found.
 - No required mutation was unavailable.
-- No expensive steady-state query shape is required by the verified design:
-  comment bodies can stay on the narrow id lookup path.
+- The poll-shaped metadata query succeeded at current client page bounds for
+  the live daemon-maturity candidate set; comment bodies can stay on the narrow
+  id lookup path.
 - The four `wake:*` labels are not currently defined on the ABC team. This is a
   setup note, not a schema blocker.
 - Current fork code still lacks comment read normalization and a `commentUpdate`
   adapter wrapper. That is expected and belongs to the follow-up implementation
   ticket for Linear comment reads and updates.
+
+## Validation
+
+- `npx prettier --check docs/symphony-plans/daemon-maturity-daemon-linear-verification.md`
+  - passed.
+- Live Linear GraphQL verification - passed against `ABC-281`,
+  `daemon-maturity` poll-shaped candidate set, and `ABC-247` / `ABC-246`; no
+  disposable issue created.
+- `elixir -e 'labels = [" wake:15m ", "wake:1h", "Wake:4H", "WAKE:1D"]; labels |> Enum.map(&(String.trim(&1) |> String.downcase())) |> IO.inspect(label: "normalized_labels")'`
+  - passed, output `["wake:15m", "wake:1h", "wake:4h", "wake:1d"]`.
