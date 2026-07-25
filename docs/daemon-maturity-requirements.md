@@ -2,30 +2,28 @@
 
 ```yaml
 project_code: daemon-maturity
-project_color: pink
-seed_issue: ABC-231
 base_branch: main
-integration_branch: symphony/daemon-maturity/integration
-human_lead: Jeremy Carroll <jeremy@orchestra.bio>
-human_lead_github: jeremycarroll
-linear_issue_labels:
-  - pink
-github_pr_labels:
-  - pink
-  - symphony
 ```
 
 ## Purpose
 
 This is the canonical requirements source for the `daemon-maturity` project in
-the Orchestra fork of `openai/symphony`. `ABC-231` creates this document only.
-It does not create a design document, fan-out plan, implementation tickets,
-scratch infrastructure, deploy handoff, or implementation changes.
+the Orchestra fork of `openai/symphony`. The project adds two dispatch-gate
+primitives to the Elixir/OTP Symphony reference implementation: daemon tickets
+and maturity-gated dependencies.
 
-The follow-up design ticket should use this document to produce a design without
-making new product-scope judgments. Settled decisions from the handoff documents
+`ABC-231` creates this requirements document only. It does not create a design
+document, fan-out plan, implementation tickets, scratch infrastructure, deploy
+handoff, or implementation changes.
+
+The follow-up design ticket should be able to design from this document without
+making new product-scope judgments. Settled decisions from the source handoffs
 are recorded here as requirements or constraints. Open verifications are
 requirements for follow-up work, not optional research.
+
+The three design handoffs cited below are internal Orchestra documents. Public
+readers may not be able to open those Google Docs; this file is the public
+record of the requirements those handoffs settled.
 
 ## Source Inputs Read
 
@@ -33,61 +31,77 @@ Primary sources:
 
 - `ABC-231` Linear issue and Linear project
   `Daemon Tickets + Maturity-Gated Dependencies (symphony fork)`, read through
-  Symphony Linear GraphQL on 2026-07-19.
+  Symphony Linear GraphQL on 2026-07-19 and rechecked on 2026-07-25. Internal
+  Orchestra planning source.
 - Linear project content for `daemon-maturity`, read through Symphony Linear
-  GraphQL on 2026-07-19. It provided project metadata, the target repository,
-  Google Doc links, the uploaded spec link, and the authorized upload fetch
-  command.
-- Uploaded spec `A-daemon-tickets.md`, downloaded through the Linear API on
-  2026-07-19 with:
+  GraphQL. It provided project metadata, the target repository, Google Doc
+  links, the uploaded spec link, and the authorized upload fetch command.
+  Internal Orchestra planning source.
+- Uploaded spec `A-daemon-tickets.md`, downloaded through the Linear API with
+  the Symphony worker token and rechecked on 2026-07-25 with:
 
   ```sh
-  curl -fsSL -H "Authorization: $LINEAR_API_KEY" \
+  curl -fsSL -H "Authorization: ${LINEAR_API_TOKEN:-$LINEAR_API_KEY}" \
     "https://uploads.linear.app/df362500-0e80-4b5f-b7ea-88d5100656d7/86cd55b7-a87e-4d26-a18a-13c4ffd65b28/0a1485d4-e6ae-4c9e-a494-2575cee9c28c" \
-    -o /tmp/abc-231-sources/A-daemon-tickets.uploaded.md
+    -o /tmp/abc-231-sources-current.BkTowz/A-daemon-tickets.uploaded.md
   ```
 
 - Local project spec
   `/Users/jeremy/symphony-rollout/projects/A-daemon-tickets.md`, read on
-  2026-07-19. It byte-compares identical to the uploaded spec. SHA-256 for both
-  files: `35d41575022a0030af9b73909a325f88f7d2584c0afd054a87ec04714677b0eb`.
-- Google Doc `Daemon Tickets - Design Handoff (v2)`, fetched on 2026-07-19
-  through the Symphony reader service account with:
+  2026-07-19 and rechecked on 2026-07-25. It byte-compares identical to the
+  uploaded spec. SHA-256 for both files:
+  `35d41575022a0030af9b73909a325f88f7d2584c0afd054a87ec04714677b0eb`.
+- Google Doc `Daemon Tickets - Design Handoff (v2)`, fetched through the
+  Symphony reader service account from the local Symphony operator workspace
+  with:
 
   ```sh
   node scripts/fetch-google-doc.mjs 1seRuyDY_SlVHy907aB4G7T-iVsIzfA0V-7vzj9Fedf8
   ```
 
-- Google Doc `Maturity-Gated Dependencies - Design Handoff (v2)`, fetched on
-  2026-07-19 through the Symphony reader service account with:
+- Google Doc `Maturity-Gated Dependencies - Design Handoff (v2)`, fetched
+  through the Symphony reader service account from the local Symphony operator
+  workspace with:
 
   ```sh
   node scripts/fetch-google-doc.mjs 1uz7ljPlB3ix6hLyO28g0E4fzSYikaP_KwCh1CEEZz8Q
   ```
 
-- Google Doc `Minimal Ticket State Model - Design Handoff (v7)`, fetched on
-  2026-07-19 through the Symphony reader service account with:
+- Google Doc `Minimal Ticket State Model - Design Handoff (v7)`, fetched
+  through the Symphony reader service account from the local Symphony operator
+  workspace with:
 
   ```sh
   node scripts/fetch-google-doc.mjs 12Z34LEXn37p3iOtTk5YfGGMdYPvcmFfUbDSjCVGVQiI
   ```
 
-Local workflow sources:
+Local workflow and review sources:
 
-- `WORKFLOW.md`, read from the local Symphony workspace on 2026-07-19.
-- `.codex/skills/symphony-project-factory/SKILL.md`, read from the local
-  Symphony workspace on 2026-07-19.
-- `.codex/skills/karpathy-guidelines/SKILL.md`, read from the local Symphony
-  workspace on 2026-07-19.
+- The Symphony operating workflow contract in the local Symphony operator
+  checkout at `WORKFLOW.md`, read from the `Orchestra-Bio/orc-app` Symphony
+  harness workspace. This is not `elixir/WORKFLOW.md` in this repository; that
+  file remains the upstream Elixir example workflow.
+- `.codex/skills/symphony-project-factory/SKILL.md`, read from the same local
+  operator workspace. It is not part of this repository.
+- `.codex/skills/karpathy-guidelines/SKILL.md`, read from the same local
+  operator workspace. It is not part of this repository.
+- GitHub PR #1 human review and decision comments on 2026-07-25. These comments
+  are the human-decision source for landing this document in the fork, shrinking
+  phase-1 stack override scope, `max_stack_depth`, and class-based concurrency
+  budgets.
 
-Repo placement context:
+Repo context:
 
 - `Orchestra-Bio/symphony` target fork, cloned at `main` commit
-  `45a53b8588a9650c2f424cb31a6495af1bc86727` on 2026-07-19.
+  `45a53b8588a9650c2f424cb31a6495af1bc86727` on 2026-07-19 and PR branch
+  `6615078c334b769818c0e31915dba73fa45ac963` on 2026-07-25.
 - Target fork `README.md`, existing `docs/*`, and scoped `elixir/AGENTS.md`
-  inspected on 2026-07-19.
+  inspected for repository context.
 
-Source inputs unavailable: none.
+Source inputs unavailable to the Symphony worker: none. Some sources above are
+internal-only provenance; public readers should treat this file as the
+dereferenceable requirements record when they cannot access the underlying
+handoffs.
 
 ## Source Key
 
@@ -97,11 +111,15 @@ Source inputs unavailable: none.
 - `S4`: `Daemon Tickets - Design Handoff (v2)`.
 - `S5`: `Maturity-Gated Dependencies - Design Handoff (v2)`.
 - `S6`: `Minimal Ticket State Model - Design Handoff (v7)`.
-- `S7`: Local `WORKFLOW.md`.
-- `S8`: Local `.codex/skills/symphony-project-factory/SKILL.md`.
-- `S9`: Local `.codex/skills/karpathy-guidelines/SKILL.md`.
+- `S7`: Local Symphony operator workflow contract in
+  `Orchestra-Bio/orc-app`, not this repository.
+- `S8`: Local Symphony project-factory skill in the operator workspace, not
+  this repository.
+- `S9`: Local Karpathy guidelines skill in the operator workspace, not this
+  repository.
 - `S10`: Target fork repo context at
   `45a53b8588a9650c2f424cb31a6495af1bc86727`.
+- `S11`: GitHub PR #1 human review and decision comments from 2026-07-25.
 
 ## Goal
 
@@ -125,11 +143,13 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 - Implementation surface: the Elixir/OTP Symphony reference implementation in
   the fork. [S3, S4, S5, S10]
 - Selected base branch: `main`. [S1, S2, S7]
-- Configured project integration branch:
-  `symphony/daemon-maturity/integration`. [S1, S2, S7]
-- Project metadata labels: Linear label `pink`; GitHub PR labels `pink` and
-  `symphony`. [S1, S2]
-- Human lead: Jeremy Carroll. [S1, S2]
+- The project-level integration branch is
+  `symphony/daemon-maturity/integration`, but this requirements PR remains based
+  on `main`. [S1, S2, S7]
+- Project metadata labels for workflow routing are Linear label `pink` and
+  GitHub PR labels `pink` and `symphony`; those labels are process metadata, not
+  product requirements. [S1, S2]
+- Human lead for unresolved product decisions: Jeremy Carroll. [S1, S2]
 - The handoff documents are settled decisions unless a listed verification
   fails. Design work should not relitigate them. [S1, S3, S4, S5, S6]
 
@@ -144,9 +164,15 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 - Do not create fan-out payloads, implementation tickets, scratch
   infrastructure, deploy handoffs, or implementation changes from this
   requirements ticket. [S1, S7, S8, S9]
+- Do not implement phase-1 per-ticket stack override semantics. The `stack:*`
+  vocabulary is deferred to a later enhancement and remains an open question.
+  [S5, S11]
 
 ## Accepted Constraints
 
+- Source precedence is `S6 > S4 > S3` wherever those sources conflict. In
+  particular, S3's `next_wake_at` / `last_evaluated_at` tracker-metadata lease
+  scheme is superseded and must not be implemented. [S4, S6, S11]
 - Fork `main` is a published artifact and must sync from upstream through true
   merges, never through rebasing. [S3, S4]
 - A derived rebased branch may be force-pushed as a read-only artifact, but its
@@ -160,7 +186,7 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 - Linear is a passive datastore and human UI. Bot or workflow bridges, agents,
   and the orchestrator own state transitions and comments. [S6]
 - Daemon and maturity behavior must be re-derived from tracker state on poll.
-  Durable daemon sleep state must not depend on in-memory timers. [S4, S5, S6]
+  [S4, S5, S6]
 - The maturity gate adds no orchestrator tracker writes; it is a read-only,
   snapshot-derived gate. [S5]
 - Normal-ticket dispatch remains upstream-compatible except where explicitly
@@ -183,13 +209,15 @@ jitter. A prod is any comment newer than the latest verdict comment. Wake reason
 is advisory only; evaluation must re-read the world at evaluation time. [S3,
 S4, S6]
 
-### R3. Daemon Durability And Jitter
+### R3. Daemon Restart Tolerance And Jitter
 
-Daemon sleep durability lives in the tracker, not in memory. The system must not
-use in-memory retry timers for daemon sleeps. Wake precision is polling
-granularity plus or minus one minute of jitter, with per-sleep jitter drawn from
-`{-60, -30, 0, 30, 60}` seconds and startup staggering for overdue daemons. [S3,
-S4, S6]
+After an orchestrator restart, a daemon may re-evaluate up to one cadence
+interval early or late; this is acceptable and non-catastrophic. The invariant
+that must hold is that no daemon is left with neither a computable future wake
+time nor an Active state. Wake precision is polling granularity plus or minus
+one minute of jitter, with per-sleep jitter drawn from
+`{-60, -30, 0, 30, 60}` seconds and startup staggering for overdue daemons. [S4,
+S6, S11]
 
 ### R4. Daemon Linear Binding
 
@@ -243,31 +271,35 @@ Use Linear native blocks and blocked-by relations as the edge source of truth.
 A blocked ticket is dispatch-eligible when every direct blocker is terminal or
 carries one configured maturity label. The default maturity label set is
 `["mature"]`. An empty maturity-label configuration reproduces upstream
-terminal-only behavior. [S3, S5]
+terminal-only behavior. Daemon-state blockers are the exception handled by R15.
+[S3, S5]
 
 ### R11. Depth-2-And-Deeper DAG Dispatch
 
 Frontier tickets with no incomplete blockers continue to dispatch as normal PRs
 over `main`. Depth-2-and-deeper tickets may dispatch as stacked work when their
 direct blockers reach maturity. The rule is edge-local and composes to deeper
-DAGs without extra depth-specific logic. [S3, S5]
+DAGs, but phase 1 must respect `max_stack_depth` with default `3` so the agent
+fleet cannot run arbitrarily far ahead of human review capacity. [S3, S5, S11]
 
-### R12. Maturity Signal Ownership
+### R12. Maturity Signal External Dependency
 
-The blocker ticket's own coding agent owns adding the maturity label when that
-ticket passes first human review, and removing the label to signal regression.
-The orchestrator must not read GitHub state for the maturity decision; GitHub
-events must be mirrored into Linear labels or comments by agents or bridges.
-[S5, S6]
+This project owns the Elixir maturity gate. The plan-side project owns branch
+mechanics and the workflow instruction that a blocker's coding agent sets the
+maturity label on first human review and removes it to signal regression. Until
+this project's Elixir gate ships, the plan-side project runs in degraded serial
+mode: dependents wait for terminal blockers, which is correct but slower. The
+orchestrator must not read GitHub state for the maturity decision; GitHub events
+must be mirrored into Linear labels or comments by agents or bridges. [S5, S6,
+S11]
 
-### R13. Per-Ticket Stack Overrides
+### R13. Phase-1 Maturity Scope
 
-Parse `stack:*` labels on the dependent ticket. Required labels are
-`stack:eager`, `stack:after-review`, and `stack:after-land`.
-`stack:after-review` is the default maturity-label behavior. `stack:after-land`
-requires terminal blockers. `stack:eager` dispatches as soon as blocker branch
-bases exist. Unknown or conflicting stack labels must fall back to the workflow
-default and must never become eager. [S3, S5]
+Phase 1 uses the configured maturity-label gate from R10. Per-ticket stack
+overrides, including the AI-review versus human-review distinction and any
+future `stack:*` vocabulary, are deferred to a later enhancement and must not be
+implemented implicitly. Unknown or experimental stack labels must not widen
+eligibility before the maturity gate says the ticket is ready. [S5, S11]
 
 ### R14. Maturity Regression Behavior
 
@@ -286,12 +318,16 @@ S6]
 
 ### R16. Divergences And Documentation
 
-`DIVERGENCES.md` must record the spec-level changes for daemon states and wake
-semantics, the orchestrator dispatch flip and exhaustion park, maturity-gated
-dependencies, team-scoped dispatch, hook environment metadata, the
-one-orchestrator-per-team invariant, and any final branch-name divergence if
-needed. Cookbook material must cover the project sentinel pattern, repo
-neutrality, and multi-repo workspaces. [S3, S4, S5]
+Create `DIVERGENCES.md` early, before the first implementation divergence needs
+to land. For this project, the initial divergence list must cover daemon states
+and wake semantics, the orchestrator dispatch flip and exhaustion park,
+maturity-gated dependency dispatch, and class-based concurrency budgets if R19
+is implemented. The divergence list should grow only when a requirement or
+implementation ticket establishes the behavior; do not pre-document
+team-scoped dispatch, hook environment metadata, one-orchestrator-per-team, or
+`branch_name` behavior from this requirements ticket alone. Cookbook material
+must cover the project sentinel pattern, repo neutrality, and multi-repo
+workspaces when those conventions are actually introduced. [S3, S4, S5, S11]
 
 ### R17. Verification-First Implementation
 
@@ -308,14 +344,75 @@ location, result, known limitations, and next handoff. Local unit tests are not
 enough for the project-completion sentinel or tree-equality branch strategy;
 those need observable workflow or CI evidence. [S1, S7]
 
-## Open Verifications
+### R19. Class-Based Concurrency Budgets
 
-| Open verification                                                                                                                                                                      | Why it matters                                                                                                                   | Owner and follow-up                                                                                                                                                                             |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Current upstream `SPEC.md` facts: state-set defaults, tick sequence, retry formula, restart semantics, hook contract, issue `branch_name`, and upstream TODOs.                         | Daemon and maturity changes must extend current upstream behavior rather than an outdated handoff snapshot.                      | Owner: `daemon-maturity` design/fan-out follow-up under Jeremy Carroll. Follow-up: create a verification ticket before implementation tickets that depend on upstream spec facts.               |
-| Daemon wake comment and label fetch mechanics: comment fetch cost, `createdAt` ordering, `wake:*` label visibility, and blocking-relation visibility in the normalized issue model.    | The daemon wake rule depends on comments, labels, and blockers being available cheaply and reliably at poll time.                | Owner: daemon wake verification follow-up under Jeremy Carroll. Follow-up: verify the Linear fetch path before implementing wake eligibility or Linear binding.                                 |
-| Maturity gate relation direction and label visibility: blocks versus blocked-by direction, labels on blocked or non-candidate tickets, and label-change visibility in snapshot deltas. | The maturity gate must evaluate the correct blocker edges and detect maturity regression without adding GitHub reads.            | Owner: maturity gate verification follow-up under Jeremy Carroll. Follow-up: verify relation and label mechanics before implementing `maturity_labels`, `stack:*`, or regression prod behavior. |
-| Tree-equality CI between fork `main` and the derived rebased branch.                                                                                                                   | The repo strategy depends on fork `main` being merge-maintained while the rebased branch remains a tree-equal adoption artifact. | Owner: repo strategy and CI follow-up under Jeremy Carroll. Follow-up: create the rebased branch contract and CI check before relying on the adoption branch.                                   |
+`max_concurrent_agents` must be budgeted by configured state class. Each
+non-implementation class carries an optional ceiling, defaulting to 50% of the
+cap with a floor applied, and an optional floor. Implementation-class work may
+consume any slot not held by a class floor. Ceilings are evaluated per tick from
+the snapshot alongside the existing priority, `created_at`, and identifier sort,
+which continues to order work within a class. The status surface must report
+occupancy per class. [S11]
+
+This is engine behavior, not cookbook guidance. It needs a `DIVERGENCES.md`
+paragraph if implemented. Tests should use deterministic synthetic candidate
+lists plus a class map and cap to assert the expected dispatch set. [S11]
+
+## Verification Backlog And Open Questions
+
+### Answered Planning Input
+
+- **Maturity gate evaluation location.** The 2026-07-25 human review identifies
+  the candidate fetch, dispatch ordering path, config validation, and
+  GraphQL-function injection pattern as the code areas to harvest from the
+  related `jeremycarroll/symphony` `codex/deprioritize-ci-polling` branch. Treat
+  this as answered planning input for where the gate belongs; implementation
+  still needs ordinary current-branch code reading before edits. Owner: design
+  follow-up under Jeremy Carroll. Follow-up: carry these file/function targets
+  into the design ticket and verify exact current names against `main`. [S11]
+
+### Remaining Verifications
+
+- **Current upstream `SPEC.md` facts.** Verify state-set defaults, tick sequence,
+  retry formula, restart semantics, hook contract, issue `branch_name`, and
+  upstream TODOs. Owner: `daemon-maturity` design/fan-out follow-up under Jeremy
+  Carroll. Follow-up: create a verification ticket before implementation
+  tickets that depend on upstream spec facts. [S3, S4]
+- **Daemon wake comment and label fetch mechanics.** Verify comment fetch cost,
+  `createdAt` ordering, `wake:*` label visibility, and blocking-relation
+  visibility in the normalized issue model. Owner: daemon wake verification
+  follow-up under Jeremy Carroll. Follow-up: verify the Linear fetch path before
+  implementing wake eligibility or Linear binding. [S3, S4, S6]
+- **Maturity gate relation direction and label visibility.** Verify blocks
+  versus blocked-by direction, labels on blocked or non-candidate tickets, and
+  label-change visibility in snapshot deltas. Owner: maturity gate verification
+  follow-up under Jeremy Carroll. Follow-up: verify relation and label mechanics
+  before implementing `maturity_labels` or regression prod behavior. [S3, S5]
+- **Tree-equality CI between fork `main` and the derived rebased branch.** Verify
+  that the CI job fails loudly on drift. Owner: repo strategy and CI follow-up
+  under Jeremy Carroll. Follow-up: create the rebased branch contract and CI
+  check before relying on the adoption branch. [S3, S4]
+
+### Open Product Questions
+
+- **Stack override enhancement.** Decide whether phase-2 per-ticket stack
+  overrides should exist, what vocabulary they use, and whether "ready for
+  review" means AI review, human review, or another maturity signal. Owner:
+  human lead Jeremy Carroll. Follow-up: later enhancement ticket; not phase-1
+  scope. [S5, S11]
+- **R19 percent or absolute budgets.** Decide whether class budgets are
+  configured as percentages of `max_concurrent_agents` or absolute counts. If
+  absolute, validation must reject class floors whose sum exceeds the cap.
+  Owner: human lead Jeremy Carroll. Follow-up: resolve in the design ticket
+  before implementation. [S11]
+- **R19 urgent escape hatch.** Decide whether urgent recurring work can exceed a
+  class ceiling. Recommendation from the human review is not to add the escape
+  hatch unless a real case appears. Owner: human lead Jeremy Carroll. Follow-up:
+  resolve in the design ticket before implementation. [S11]
+- **R19 sequencing.** Decide whether class-based budgets ship with daemon work
+  or earlier. If GitHub-to-Linear bridges remove CI-polling occupancy first, the
+  permanent motivation is daemon recurrence rather than CI polling. Owner: human
+  lead Jeremy Carroll. Follow-up: resolve in project planning. [S11]
 
 ## Project Done Predicate
 
@@ -325,16 +422,25 @@ The `daemon-maturity` project is done only when all of the following are true:
   observably sleeps, wakes, evaluates, and prods when Unhappy. [S3, S4]
 - Daemon wake-contract tests pass with synthetic snapshots, a fake clock, seeded
   jitter, and blocked-daemon coverage. [S3, S4, S6]
-- Lease and restart-recovery tests pass: kill during sleep re-evaluates on
-  schedule after restart, and kill during evaluation re-dispatches the Active
-  daemon so the verdict is re-derived. [S3, S4, S6]
+- Daemon Linear-binding tests prove absent, unknown, or unparseable `wake:*`
+  cadence labels never mean wake-now. [S3, S4, S6, S11]
+- Lease and restart-recovery tests pass: kill during sleep re-evaluates within
+  the accepted restart tolerance, and kill during evaluation re-dispatches the
+  Active daemon so the verdict is re-derived. [S4, S6, S11]
 - Failure handling proves retry exhaustion parks the daemon back to Unhappy,
   writes an unevaluated sentinel verdict, and avoids hot looping. [S3, S4, S6]
 - A depth-2 chain dispatches early when its blocker gains the maturity label,
   and the dependent survives blocker maturity regression without killing the
   worker. [S3, S5]
-- Depth-3 synthetic coverage shows edge-local maturity composition. [S3, S5]
-- `DIVERGENCES.md` and required cookbook entries are complete. [S3, S4, S5]
+- Depth-3 synthetic coverage shows edge-local maturity composition within the
+  `max_stack_depth` default. [S3, S5, S11]
+- Phase-1 maturity-gate tests prove unknown or experimental stack labels do not
+  make a dependent eligible before the maturity gate is satisfied. [S5, S11]
+- Class-based concurrency budget tests prove recurring classes cannot occupy
+  the whole dispatch pool while implementation work is eligible. [S11]
+- `DIVERGENCES.md` exists before the first implementation divergence lands and
+  contains the divergence paragraphs required by completed implementation work.
+  [S3, S4, S5, S11]
 - The derived rebased branch has CI evidence showing tree equality with fork
   `main`. [S3, S4]
 
@@ -350,7 +456,7 @@ The `daemon-maturity` project is done only when all of the following are true:
   daemon and depth-2 maturity dispatch. If real Linear evidence is blocked,
   record the blocker and the exact handoff needed.
 - PRs must be opened against `main`, carry GitHub labels `pink` and `symphony`,
-  and record the selected base branch and validation evidence.
+  and record the selected base branch and validation evidence. [S1, S2, S7]
 
 ## ABC-231 Done Predicate
 
