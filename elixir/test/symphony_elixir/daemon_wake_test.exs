@@ -45,11 +45,31 @@ defmodule SymphonyElixir.DaemonWakeTest do
         created_at: ~U[2026-07-26 09:00:00Z]
       })
 
-    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config, jitter_fun: zero_jitter())
+    jitter = DaemonWake.deterministic_jitter_seconds(issue, nil, "4h", ~U[2026-07-26 09:00:00Z])
+    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config)
 
     assert decision.status == :sleep
-    assert decision.next_wake_at == ~U[2026-07-26 13:00:00Z]
+
+    assert decision.next_wake_at ==
+             ~U[2026-07-26 09:00:00Z]
+             |> DateTime.add(4 * 60 * 60, :second)
+             |> DateTime.add(jitter, :second)
+
     assert decision.warnings == [:missing_workpad_anchor]
+  end
+
+  test "missing comment anchor and created_at is invalid" do
+    issue =
+      issue(%{
+        comments: [comment("missing-timestamp", nil)],
+        created_at: nil
+      })
+
+    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config)
+
+    assert decision.status == :invalid
+    assert decision.next_wake_at == nil
+    assert decision.warnings == [:missing_created_at]
   end
 
   test "conflicting wake labels use default cadence and never wake immediately" do
@@ -64,6 +84,20 @@ defmodule SymphonyElixir.DaemonWakeTest do
     assert decision.status == :sleep
     assert decision.next_wake_at == ~U[2026-07-26 13:00:00Z]
     assert decision.warnings == [:conflicting_wake_labels]
+  end
+
+  test "unsupported wake labels use default cadence and never wake immediately" do
+    issue =
+      issue(%{
+        labels: ["wake:7h"],
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
+      })
+
+    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config, jitter_fun: zero_jitter())
+
+    assert decision.status == :sleep
+    assert decision.next_wake_at == ~U[2026-07-26 13:00:00Z]
+    assert decision.warnings == [:unsupported_wake_label]
   end
 
   test "deterministic jitter is stable and applied to durable sleep inputs" do
@@ -176,6 +210,17 @@ defmodule SymphonyElixir.DaemonWakeTest do
     config = %{@config | daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]}
 
     assert DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], config).status == :dispatching
+  end
+
+  test "issues without daemon states are ignored" do
+    issue =
+      issue(%{
+        state: nil,
+        labels: ["wake:15m"],
+        comments: [comment("daemon-comment", ~U[2026-07-26 08:00:00Z])]
+      })
+
+    assert DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config).status == :not_daemon
   end
 
   defp issue(attrs) do

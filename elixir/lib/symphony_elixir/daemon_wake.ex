@@ -42,8 +42,8 @@ defmodule SymphonyElixir.DaemonWake do
 
   @spec evaluate(Issue.t(), DateTime.t(), config(), keyword()) :: t()
   def evaluate(%Issue{} = issue, %DateTime{} = now, %{} = config, opts \\ []) do
-    daemon_states = normalized_states(config_value(config, :daemon_states, []))
-    dispatch_states = normalized_states(config_value(config, :daemon_dispatch_states, []))
+    daemon_states = normalized_states(Map.get(config, :daemon_states, []))
+    dispatch_states = normalized_states(Map.get(config, :daemon_dispatch_states, []))
     state = normalize_string(issue.state)
 
     cond do
@@ -125,13 +125,13 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp incomplete_blockers(issue, config) do
-    terminal_states = normalized_states(config_value(config, :terminal_states, []))
+    terminal_states = normalized_states(Map.get(config, :terminal_states, []))
 
     blockers =
       issue.blocked_by
       |> Enum.reject(fn blocker ->
         blocker
-        |> map_value(:state, "state")
+        |> Map.get(:state)
         |> normalize_string()
         |> then(&(&1 in terminal_states))
       end)
@@ -140,7 +140,7 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp resolve_cadence(labels, config) do
-    default_wake = normalize_wake(config_value(config, :daemon_default_wake, "1h"))
+    default_wake = normalize_wake(Map.get(config, :daemon_default_wake, "1h"))
 
     wake_labels =
       labels
@@ -170,7 +170,6 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp supported_wake_label?("wake:" <> cadence), do: Map.has_key?(@supported_wakes, cadence)
-  defp supported_wake_label?(_label), do: false
 
   defp resolve_anchor(issue) do
     anchor_comments =
@@ -209,30 +208,15 @@ defmodule SymphonyElixir.DaemonWake do
     )
   end
 
-  defp comment_updated_at(comment) do
-    comment
-    |> map_value(:updated_at, "updatedAt")
-    |> parse_datetime()
-  end
+  defp comment_updated_at(comment), do: Map.get(comment, :updated_at)
+  defp comment_id(comment), do: Map.get(comment, :id)
 
-  defp comment_id(comment), do: map_value(comment, :id, "id")
-
-  defp config_value(config, key, default) do
-    Map.get(config, key) || Map.get(config, to_string(key)) || default
-  end
-
-  defp map_value(map, atom_key, string_key) do
-    Map.get(map, atom_key) || Map.get(map, string_key)
-  end
-
-  defp normalized_states(values) when is_list(values) do
+  defp normalized_states(values) do
     values
     |> Enum.map(&normalize_string/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
   end
-
-  defp normalized_states(_values), do: []
 
   defp normalize_wake(value) do
     value
@@ -247,16 +231,4 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp normalize_string(_value), do: ""
-
-  defp parse_datetime(%DateTime{} = datetime), do: datetime
-  defp parse_datetime(nil), do: nil
-
-  defp parse_datetime(raw) when is_binary(raw) do
-    case DateTime.from_iso8601(raw) do
-      {:ok, datetime, _offset} -> datetime
-      _ -> nil
-    end
-  end
-
-  defp parse_datetime(_raw), do: nil
 end
