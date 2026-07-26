@@ -2,7 +2,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   use SymphonyElixir.TestSupport
   alias Ecto.Changeset
   alias SymphonyElixir.Config.Schema
-  alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
+  alias SymphonyElixir.Config.Schema.{Codex, StringOrMap, Tracker}
   alias SymphonyElixir.Linear.Client
 
   test "workspace bootstrap can be implemented in after_create hook" do
@@ -1065,6 +1065,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Schema.normalize_optional_string(" value ") == "value"
     assert Schema.normalize_optional_string(" ") == nil
     assert Schema.normalize_optional_string(123) == nil
+    assert Schema.normalize_string_set(:not_a_list) == []
+    assert Schema.normalize_issue_state(:Todo) == "todo"
+
+    unchanged_changeset = Changeset.change({%{}, %{}})
+    assert Schema.reject_config_fields(unchanged_changeset, nil, ["daemon_label"]) == unchanged_changeset
+    assert %Changeset{} = Tracker.changeset(%Tracker{active_states: nil}, %{})
 
     changeset =
       {%{}, %{limits: :map}}
