@@ -21,17 +21,17 @@ migration belongs to the switchover.
 
 ### Workflow States
 
-| Role                         | Required Linear category | Config relationship                                                                                                              | Notes                                                                                        |
-| ---------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Backlog                      | Backlog                  | Outside active and terminal dispatch.                                                                                            | Existing backlog state may be reused.                                                        |
-| Implementation active pool   | Started                  | Listed in `tracker.active_states`; implementation-class dispatch uses this pool after excluding `tracker.daemon_dispatch_state`. | Replaces older implementation states such as todo, in-progress, or rework during switchover. |
-| Someone else's move          | Unstarted                | Not listed in `tracker.active_states`.                                                                                           | One inactive state; reason is carried by `waiting:*` labels when this state is adopted.      |
-| Daemon resting, satisfied    | Started                  | Listed in `tracker.daemon_states`.                                                                                               | Resting daemon state; not dispatched as ordinary active work.                                |
-| Daemon resting, dissatisfied | Started                  | Listed in `tracker.daemon_states`.                                                                                               | Resting daemon state; not dispatched as ordinary active work.                                |
-| Daemon dispatch/evaluating   | Started                  | Equals `tracker.daemon_dispatch_state` and is also listed in `tracker.active_states`.                                            | Daemon-only lease target. It must be excluded from the implementation-class active scope.    |
-| Done                         | Completed                | Listed in `tracker.terminal_states`.                                                                                             | Existing done state may be reused.                                                           |
-| Cancelled                    | Canceled                 | Listed in `tracker.terminal_states`.                                                                                             | Existing cancelled state may be reused.                                                      |
-| Duplicate                    | Duplicate                | Listed in `tracker.terminal_states` when the deployment has a duplicate workflow state.                                          | Existing duplicate state may be reused.                                                      |
+| Role                         | Required Linear category | Config relationship                                                                                                               | Notes                                                                                        |
+| ---------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Backlog                      | Backlog                  | Outside active and terminal dispatch.                                                                                             | Existing backlog state may be reused.                                                        |
+| Implementation active pool   | Started                  | Listed in `tracker.active_states`; implementation-class dispatch uses this pool after excluding `tracker.daemon_dispatch_states`. | Replaces older implementation states such as todo, in-progress, or rework during switchover. |
+| Someone else's move          | Unstarted                | Not listed in `tracker.active_states`.                                                                                            | One inactive state; reason is carried by `waiting:*` labels when this state is adopted.      |
+| Daemon resting, satisfied    | Started                  | Listed in `tracker.daemon_states`.                                                                                                | Resting daemon state; not dispatched as ordinary active work.                                |
+| Daemon resting, dissatisfied | Started                  | Listed in `tracker.daemon_states`.                                                                                                | Resting daemon state; not dispatched as ordinary active work.                                |
+| Daemon dispatch/evaluating   | Started                  | Listed in `tracker.daemon_dispatch_states` and `tracker.active_states`.                                                           | Daemon-only lease target. It must be excluded from the implementation-class active scope.    |
+| Done                         | Completed                | Listed in `tracker.terminal_states`.                                                                                              | Existing done state may be reused.                                                           |
+| Cancelled                    | Canceled                 | Listed in `tracker.terminal_states`.                                                                                              | Existing cancelled state may be reused.                                                      |
+| Duplicate                    | Duplicate                | Listed in `tracker.terminal_states` when the deployment has a duplicate workflow state.                                           | Existing duplicate state may be reused.                                                      |
 
 The daemon dispatch state is a deliberate extra active state. It is a work-class
 state, not a pipeline state. It exists so daemon evaluation can be dispatched,
@@ -54,14 +54,17 @@ strand them instead of pausing them.
 
 ### Switchover Invariants
 
-- `tracker.daemon_dispatch_state` must normalize to exactly one configured
-  active state and must be disjoint from daemon and terminal states.
+- `tracker.daemon_dispatch_states` must normalize to one or more configured
+  active states and must be disjoint from daemon and terminal states.
+- The first configured element of `tracker.daemon_dispatch_states` is the lease
+  write target. All configured elements are recognized for daemon identity,
+  crash recovery, and exclusion from the implementation-class scope.
 - `tracker.daemon_states` must be disjoint from active and terminal states after
   normalization.
 - Implementation-class dispatch must use
-  `tracker.active_states - {tracker.daemon_dispatch_state}`.
-- An operator forcing a daemon wake must move the ticket to the daemon dispatch
-  state, not to an ordinary implementation active state.
+  `tracker.active_states - tracker.daemon_dispatch_states`.
+- An operator forcing a daemon wake must move the ticket to the first configured
+  daemon dispatch state, not to an ordinary implementation active state.
 - Daemons use `wake:*` labels for cadence and titled workpad comments for their
   verdict anchor. Comments do not cause wake eligibility.
 
@@ -85,7 +88,8 @@ tracker:
   daemon_states:
     - Happy
     - Unhappy
-  daemon_dispatch_state: Evaluating
+  daemon_dispatch_states:
+    - Evaluating
   daemon_default_wake: 1h
   maturity_labels:
     - mature
@@ -98,6 +102,9 @@ agent:
 During a rename or migration window, `tracker.active_states` may temporarily
 include legacy implementation names alongside `Active` and `Evaluating`. That is
 a compatibility bridge only; the switchover target is the config above.
+Similarly, a daemon dispatch-state rename may temporarily list
+`daemon_dispatch_states: [NewName, OldName]`; the orchestrator writes leases to
+the first configured state while still recognizing older in-flight tickets.
 
 ### Workflow State Record
 
@@ -266,11 +273,14 @@ Variables:
 ### Switchover Checklist
 
 - Configure `tracker.active_states` to include `Active` and `Evaluating`.
-- Configure implementation-class dispatch to use active states minus
-  `Evaluating`.
+- Configure implementation-class dispatch to use active states minus every
+  configured daemon dispatch state.
 - Ratify `Evaluating` with the human lead before treating the daemon dispatch
   state name as final.
-- Configure `tracker.daemon_dispatch_state` as `Evaluating`.
+- Configure `tracker.daemon_dispatch_states` as `Evaluating`.
+- Confirm the first configured `tracker.daemon_dispatch_states` element is the
+  lease write target and all configured elements are recognized for daemon
+  identity, crash recovery, and implementation-scope exclusion.
 - Configure `tracker.daemon_states` as `Happy` and `Unhappy`.
 - Configure `tracker.terminal_states` as `Done`, `Canceled`, and `Duplicate`.
 - Configure `tracker.maturity_labels` as `mature`, unless intentionally
