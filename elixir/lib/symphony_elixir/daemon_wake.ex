@@ -6,7 +6,6 @@ defmodule SymphonyElixir.DaemonWake do
   alias SymphonyElixir.Linear.Issue
 
   @jitter_offsets_seconds [-60, -30, 0, 30, 60]
-  @default_workpad_title "## Symphony Workpad"
   @supported_wakes %{
     "15m" => 15 * 60,
     "1h" => 60 * 60,
@@ -26,13 +25,12 @@ defmodule SymphonyElixir.DaemonWake do
           | :unsupported_wake_label
           | :missing_workpad_anchor
           | :missing_created_at
-          | :duplicate_titled_comments
+          | :duplicate_workpad_anchors
   @type config :: %{
           optional(:daemon_states) => [String.t()] | MapSet.t(),
           optional(:daemon_dispatch_states) => [String.t()] | MapSet.t(),
           optional(:terminal_states) => [String.t()] | MapSet.t(),
-          optional(:daemon_default_wake) => String.t(),
-          optional(:symphony_workpad_title) => String.t()
+          optional(:daemon_default_wake) => String.t()
         }
   @type t :: %__MODULE__{
           status: status(),
@@ -41,12 +39,6 @@ defmodule SymphonyElixir.DaemonWake do
           warnings: [warning()],
           startup_stagger_ms: non_neg_integer()
         }
-
-  @spec workpad_title(config()) :: String.t()
-  def workpad_title(%{} = config) do
-    config_value(config, :symphony_workpad_title, @default_workpad_title)
-    |> normalize_workpad_title()
-  end
 
   @spec evaluate(Issue.t(), DateTime.t(), config(), keyword()) :: t()
   def evaluate(%Issue{} = issue, %DateTime{} = now, %{} = config, opts \\ []) do
@@ -183,20 +175,21 @@ defmodule SymphonyElixir.DaemonWake do
   defp resolve_anchor(issue) do
     anchor_comments =
       issue.comments
-      |> Enum.map(fn comment ->
-        {comment, comment_updated_at(comment)}
+      |> Enum.flat_map(fn comment ->
+        case comment_updated_at(comment) do
+          %DateTime{} = updated_at -> [%{comment: comment, updated_at: updated_at}]
+          _updated_at -> []
+        end
       end)
-      |> Enum.reject(fn {_comment, updated_at} -> is_nil(updated_at) end)
-      |> Enum.map(fn {comment, _updated_at} -> comment end)
 
     duplicate_warning =
-      if length(anchor_comments) > 1, do: [:duplicate_titled_comments], else: []
+      if length(anchor_comments) > 1, do: [:duplicate_workpad_anchors], else: []
 
-    case anchor_comments do
-      [comment | _rest] ->
-        {:ok, comment_id(comment), comment_updated_at(comment), duplicate_warning}
+    case latest_anchor(anchor_comments) do
+      %{comment: comment, updated_at: updated_at} ->
+        {:ok, comment_id(comment), updated_at, duplicate_warning}
 
-      [] ->
+      nil ->
         case issue.created_at do
           %DateTime{} = created_at ->
             {:ok, nil, created_at, [:missing_workpad_anchor]}
@@ -205,6 +198,15 @@ defmodule SymphonyElixir.DaemonWake do
             {:error, :missing_created_at}
         end
     end
+  end
+
+  defp latest_anchor(anchor_comments) do
+    Enum.max_by(
+      anchor_comments,
+      & &1.updated_at,
+      fn left, right -> DateTime.compare(left, right) != :lt end,
+      fn -> nil end
+    )
   end
 
   defp comment_updated_at(comment) do
@@ -244,17 +246,6 @@ defmodule SymphonyElixir.DaemonWake do
     |> normalize_string()
     |> String.replace_prefix("wake:", "")
   end
-
-  defp normalize_workpad_title(title) when is_binary(title) do
-    title
-    |> String.trim()
-    |> case do
-      "" -> @default_workpad_title
-      title -> title
-    end
-  end
-
-  defp normalize_workpad_title(_title), do: @default_workpad_title
 
   defp normalize_string(value) when is_binary(value) do
     value

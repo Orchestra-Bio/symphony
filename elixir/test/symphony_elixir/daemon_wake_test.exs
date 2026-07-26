@@ -7,16 +7,8 @@ defmodule SymphonyElixir.DaemonWakeTest do
     daemon_states: ["happy", "unhappy"],
     daemon_dispatch_states: ["evaluating"],
     terminal_states: ["done", "canceled"],
-    daemon_default_wake: "4h",
-    symphony_workpad_title: "## Symphony Workpad"
+    daemon_default_wake: "4h"
   }
-
-  test "workpad title returns one server-side filter heading" do
-    assert DaemonWake.workpad_title(@config) == "## Symphony Workpad"
-
-    assert DaemonWake.workpad_title(%{@config | symphony_workpad_title: " ## Custom Workpad "}) ==
-             "## Custom Workpad"
-  end
 
   test "timer due wakes daemon from filtered Symphony workpad anchor" do
     issue =
@@ -101,13 +93,13 @@ defmodule SymphonyElixir.DaemonWakeTest do
              |> DateTime.add(jitter, :second)
   end
 
-  test "duplicate workpad anchor refs warn and use the query's first anchor" do
+  test "duplicate workpad anchor refs warn and use the latest anchor" do
     issue =
       issue(%{
         labels: ["wake:1h"],
         comments: [
-          comment("new", ~U[2026-07-26 09:45:00Z]),
-          comment("old", ~U[2026-07-26 08:00:00Z])
+          comment("old", ~U[2026-07-26 08:00:00Z]),
+          comment("new", ~U[2026-07-26 09:45:00Z])
         ]
       })
 
@@ -115,7 +107,7 @@ defmodule SymphonyElixir.DaemonWakeTest do
 
     assert decision.status == :sleep
     assert decision.next_wake_at == ~U[2026-07-26 10:45:00Z]
-    assert decision.warnings == [:duplicate_titled_comments]
+    assert decision.warnings == [:duplicate_workpad_anchors]
   end
 
   test "blocked daemons are gated until direct blockers reach terminal states" do
