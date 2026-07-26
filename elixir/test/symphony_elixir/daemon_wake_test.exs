@@ -54,6 +54,22 @@ defmodule SymphonyElixir.DaemonWakeTest do
     assert decision.warnings == [:missing_workpad_anchor]
   end
 
+  test "metadata-only comments signal unresolved titles instead of created_at fallback" do
+    issue =
+      issue(%{
+        labels: [],
+        comments: [%{id: "comment-1", updated_at: ~U[2026-07-26 09:00:00Z]}],
+        created_at: ~U[2026-07-26 01:00:00Z]
+      })
+
+    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config, jitter_fun: zero_jitter())
+
+    assert decision.status == :invalid
+    assert decision.next_wake_at == nil
+    assert decision.warnings == [:unresolved_comment_titles]
+    assert decision.unresolved_comment_ids == ["comment-1"]
+  end
+
   test "conflicting wake labels use default cadence and never wake immediately" do
     issue =
       issue(%{
@@ -162,15 +178,17 @@ defmodule SymphonyElixir.DaemonWakeTest do
     assert decision.next_wake_at == ~U[2026-07-26 09:00:00Z]
   end
 
-  test "daemon dispatch states are owned by ordinary active dispatch" do
+  test "all daemon dispatch states are owned by ordinary active dispatch" do
     issue =
       issue(%{
-        state: "Evaluating",
+        state: "Legacy Evaluating",
         labels: ["wake:15m"],
         comments: [comment("daemon-comment", ~U[2026-07-26 08:00:00Z], "## Codex Workpad")]
       })
 
-    assert DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config).status == :dispatching
+    config = %{@config | daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]}
+
+    assert DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], config).status == :dispatching
   end
 
   defp issue(attrs) do

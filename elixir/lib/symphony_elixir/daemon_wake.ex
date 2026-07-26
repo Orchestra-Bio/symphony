@@ -17,6 +17,7 @@ defmodule SymphonyElixir.DaemonWake do
             next_wake_at: nil,
             blockers: [],
             warnings: [],
+            unresolved_comment_ids: [],
             startup_stagger_ms: 0
 
   @type status :: :not_daemon | :dispatching | :gated | :invalid | :due | :sleep
@@ -26,6 +27,7 @@ defmodule SymphonyElixir.DaemonWake do
           | :missing_workpad_anchor
           | :missing_created_at
           | :duplicate_titled_comments
+          | :unresolved_comment_titles
   @type config :: %{
           optional(:daemon_states) => [String.t()] | MapSet.t(),
           optional(:daemon_dispatch_states) => [String.t()] | MapSet.t(),
@@ -39,6 +41,7 @@ defmodule SymphonyElixir.DaemonWake do
           next_wake_at: DateTime.t() | nil,
           blockers: [Issue.blocker_ref()],
           warnings: [warning()],
+          unresolved_comment_ids: [String.t()],
           startup_stagger_ms: non_neg_integer()
         }
 
@@ -123,6 +126,13 @@ defmodule SymphonyElixir.DaemonWake do
 
       {:error, warning} ->
         %__MODULE__{status: :invalid, warnings: cadence_warnings ++ [warning]}
+
+      {:unresolved, comment_ids} ->
+        %__MODULE__{
+          status: :invalid,
+          warnings: cadence_warnings ++ [:unresolved_comment_titles],
+          unresolved_comment_ids: comment_ids
+        }
     end
   end
 
@@ -177,24 +187,43 @@ defmodule SymphonyElixir.DaemonWake do
   defp resolve_anchor(issue, config) do
     titles = anchor_titles(config)
 
-    matches =
+    titled_comments =
       issue.comments
-      |> Enum.filter(fn comment ->
+      |> Enum.map(fn comment ->
         title = comment_title(comment)
         updated_at = comment_updated_at(comment)
 
-        not is_nil(updated_at) and MapSet.member?(titles, title)
+        {comment, title, updated_at}
       end)
+      |> Enum.filter(fn {_comment, _title, updated_at} -> not is_nil(updated_at) end)
+
+    unresolved_comments =
+      titled_comments
+      |> Enum.filter(fn {_comment, title, _updated_at} -> is_nil(title) end)
+
+    unresolved_comment_ids =
+      unresolved_comments
+      |> Enum.map(fn {comment, _title, _updated_at} -> comment_id(comment) end)
+      |> Enum.reject(&is_nil/1)
+
+    matches =
+      titled_comments
+      |> Enum.filter(fn {_comment, title, _updated_at} -> MapSet.member?(titles, title) end)
+      |> Enum.map(fn {comment, _title, _updated_at} -> comment end)
       |> Enum.sort_by(&comment_updated_at/1, {:desc, DateTime})
 
     duplicate_warning =
       if duplicate_titles?(matches), do: [:duplicate_titled_comments], else: []
 
-    case matches do
-      [comment | _rest] ->
+    cond do
+      unresolved_comments != [] ->
+        {:unresolved, unresolved_comment_ids}
+
+      matches != [] ->
+        comment = List.first(matches)
         {:ok, comment_id(comment), comment_updated_at(comment), duplicate_warning}
 
-      [] ->
+      true ->
         case issue.created_at do
           %DateTime{} = created_at ->
             {:ok, nil, created_at, [:missing_workpad_anchor]}
