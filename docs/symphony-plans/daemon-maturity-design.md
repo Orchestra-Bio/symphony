@@ -78,6 +78,10 @@ document as the dereferenceable public record of those sources.
   `ABC-296` / `DMAT-014` from 2026-07-25. These establish team-scoped dispatch,
   team configuration, and plural `daemon_dispatch_states` as current project
   requirements.
+- `D13`: GitHub PR #10 human review, follow-up, and decision comments from
+  2026-07-26. These are the decision source for narrowing comment refs to
+  `id`/`updatedAt`, defaulting `maturity_labels` to `[]`, and replacing the
+  nonexistent `make -C elixir specs.check` instruction with `mix specs.check`.
 
 Source precedence remains `D6 > D4 > D3` unless a later human decision source
 explicitly supersedes the handoff text for this project. The old
@@ -179,8 +183,7 @@ tracker:
   daemon_dispatch_states:
     - Evaluating
   daemon_default_wake: 1h
-  maturity_labels:
-    - mature
+  maturity_labels: []
   maturity_gate_state_scope:
     - todo
 
@@ -199,13 +202,15 @@ normalization. The first configured `daemon_dispatch_states` element is the
 lease write target. All configured elements are recognized for daemon identity,
 crash recovery, and exclusion from implementation-class dispatch, which makes a
 state rename window expressible as `[NewName, OldName]`: write to `NewName` and
-still recognize tickets already sitting in `OldName`. `maturity_labels: []`
-reproduces upstream terminal-only blocker behavior. `maturity_gate_state_scope`,
-default `["todo"]`, is compared with the same trimmed lowercase state-name
-normalization as other tracker state lists. It limits where the blocker-gate
-replacement runs and intentionally keeps the initial switch at the current
-hardcoded `Todo` scope. Widening the scope is a deployment configuration
-change, not new code. [D1:R1, D1:R4, D1:R10, D1:R11, D9, D10, D12]
+still recognize tickets already sitting in `OldName`. `maturity_labels`
+defaults to `[]`, which reproduces upstream terminal-only blocker behavior;
+`["mature"]` is the standard explicit enablement value, not the default.
+`maturity_gate_state_scope`, default `["todo"]`, is compared with the same
+trimmed lowercase state-name normalization as other tracker state lists. It
+limits where the blocker-gate replacement runs and intentionally keeps the
+initial switch at the current hardcoded `Todo` scope. Widening the scope is a
+deployment configuration change, not new code. [D1:R1, D1:R4, D1:R10, D1:R11,
+D9, D10, D12, D13]
 
 Creating the named Linear states and labels is not fork code. The implementation
 must validate and consume names as strings, and tests must be able to exercise
@@ -267,7 +272,7 @@ Daemon wake evaluation uses only fields that can be read again after restart:
 - issue id, identifier, state, labels, blockers, created time, and updated time;
 - exact `wake:*` label, if present;
 - comment metadata for the daemon's own titled workpad comment and the
-  orchestrator's titled workpad comment: id, `createdAt`, and `updatedAt`;
+  orchestrator's titled workpad comment: id and `updatedAt`;
 - comment body only when an unrecognized comment id appears and the writer title
   must be determined;
 - direct blockers and their states.
