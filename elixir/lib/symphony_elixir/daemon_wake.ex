@@ -42,8 +42,8 @@ defmodule SymphonyElixir.DaemonWake do
 
   @spec evaluate(Issue.t(), DateTime.t(), config(), keyword()) :: t()
   def evaluate(%Issue{} = issue, %DateTime{} = now, %{} = config, opts \\ []) do
-    daemon_states = normalized_states(Map.get(config, :daemon_states, []))
-    dispatch_states = normalized_states(Map.get(config, :daemon_dispatch_states, []))
+    daemon_states = normalized_states(Map.get(config, :daemon_states) || [])
+    dispatch_states = normalized_states(Map.get(config, :daemon_dispatch_states) || [])
     state = normalize_string(issue.state)
 
     cond do
@@ -125,7 +125,7 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp incomplete_blockers(issue, config) do
-    terminal_states = normalized_states(Map.get(config, :terminal_states, []))
+    terminal_states = normalized_states(Map.get(config, :terminal_states) || [])
 
     blockers =
       issue.blocked_by
@@ -140,7 +140,7 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp resolve_cadence(labels, config) do
-    default_wake = normalize_wake(Map.get(config, :daemon_default_wake, "1h"))
+    default_wake = normalize_wake(Map.get(config, :daemon_default_wake) || "1h")
 
     wake_labels =
       labels
