@@ -1,7 +1,7 @@
 defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
   use SymphonyElixir.TestSupport
 
-  test "poll-shaped candidate fetch reads bounded comment metadata and blocker labels" do
+  test "poll-shaped candidate fetch reads engine workpad anchor metadata and blocker labels" do
     raw_issue =
       raw_linear_issue(%{
         "labels" => %{"nodes" => [%{"name" => " wake:15m "}, %{"name" => "Pink"}]},
@@ -24,7 +24,7 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
               "id" => "comment-1",
               "createdAt" => "2026-07-25T16:37:19.692Z",
               "updatedAt" => "2026-07-25T17:35:21.968Z",
-              "body" => "## Codex Workpad\nbody stays out of steady-state polling"
+              "body" => "## Symphony Workpad\nbody stays out of steady-state polling"
             }
           ]
         }
@@ -66,10 +66,14 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
 
     assert_receive {:linear_graphql_request, %{"query" => query, "variables" => variables}}
     assert query =~ "issues("
-    assert query =~ "comments(first: $commentFirst)"
+
+    assert query =~
+             "comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}})"
+
     assert query =~ "updatedAt"
-    refute query =~ "body"
-    assert variables["commentFirst"] == 20
+    refute query =~ ~r/\n\s+body\s*\n/
+    assert variables["commentFirst"] == 1
+    assert variables["commentAnchorTitle"] == "## Symphony Workpad"
     assert variables["relationFirst"] == 50
   end
 
@@ -114,10 +118,14 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
     assert issue.comments == [%{id: "comment-1", updated_at: ~U[2026-07-25 17:35:21.968Z]}]
     assert issue.blocked_by == [%{id: "blocker-1", identifier: "ABC-100", state: "Done", labels: ["mature"]}]
 
-    assert_receive {:fetch_issue_states_request, query, %{ids: ["issue-1"], commentFirst: 20}}
+    assert_receive {:fetch_issue_states_request, query, %{ids: ["issue-1"], commentFirst: 1, commentAnchorTitle: "## Symphony Workpad"}}
+
     assert query =~ "SymphonyLinearIssuesById"
-    assert query =~ "comments(first: $commentFirst)"
-    refute query =~ "body"
+
+    assert query =~
+             "comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}})"
+
+    refute query =~ ~r/\n\s+body\s*\n/
   end
 
   test "narrow comment body fetch requests body by comment id only" do

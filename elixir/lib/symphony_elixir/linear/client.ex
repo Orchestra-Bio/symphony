@@ -8,9 +8,12 @@ defmodule SymphonyElixir.Linear.Client do
   alias SymphonyElixir.Config.Schema.Tracker, as: TrackerConfig
 
   @issue_page_size 50
-  @comment_page_size 20
+  @comment_page_size 1
+  @comment_anchor_title "## Symphony Workpad"
   @max_error_body_log_bytes 1_000
 
+  # Select the engine-owned workpad anchor without reading large comment bodies.
+  # Linear returns the newest `updatedAt` first, so duplicate anchors remain deterministic.
   @issue_page_fields """
       nodes {
         id
@@ -48,7 +51,7 @@ defmodule SymphonyElixir.Linear.Client do
             }
           }
         }
-        comments(first: $commentFirst) {
+        comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}}) {
           nodes {
             id
             updatedAt
@@ -64,7 +67,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_project """
-  query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $after: String) {
+  query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!, $after: String) {
     issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
   #{@issue_page_fields}
     }
@@ -72,7 +75,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_team """
-  query SymphonyLinearPollByTeam($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $after: String) {
+  query SymphonyLinearPollByTeam($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!, $after: String) {
     issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
   #{@issue_page_fields}
     }
@@ -80,7 +83,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_ids """
-  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!) {
+  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
       nodes {
         id
@@ -118,7 +121,7 @@ defmodule SymphonyElixir.Linear.Client do
             }
           }
         }
-        comments(first: $commentFirst) {
+        comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}}) {
           nodes {
             id
             updatedAt
@@ -312,6 +315,7 @@ defmodule SymphonyElixir.Linear.Client do
                first: @issue_page_size,
                relationFirst: @issue_page_size,
                commentFirst: @comment_page_size,
+               commentAnchorTitle: @comment_anchor_title,
                after: after_cursor
              }
              |> Map.merge(selector_variables)
@@ -378,7 +382,8 @@ defmodule SymphonyElixir.Linear.Client do
            ids: batch_ids,
            first: length(batch_ids),
            relationFirst: @issue_page_size,
-           commentFirst: @comment_page_size
+           commentFirst: @comment_page_size,
+           commentAnchorTitle: @comment_anchor_title
          }) do
       {:ok, body} ->
         with {:ok, issues} <- decode_linear_response(body, assignee_filter) do
