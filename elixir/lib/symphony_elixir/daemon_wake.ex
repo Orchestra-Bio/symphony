@@ -6,6 +6,7 @@ defmodule SymphonyElixir.DaemonWake do
   alias SymphonyElixir.Linear.Issue
 
   @jitter_offsets_seconds [-60, -30, 0, 30, 60]
+  @default_workpad_title "## Symphony Workpad"
   @supported_wakes %{
     "15m" => 15 * 60,
     "1h" => 60 * 60,
@@ -17,7 +18,6 @@ defmodule SymphonyElixir.DaemonWake do
             next_wake_at: nil,
             blockers: [],
             warnings: [],
-            unresolved_comment_ids: [],
             startup_stagger_ms: 0
 
   @type status :: :not_daemon | :dispatching | :gated | :invalid | :due | :sleep
@@ -27,23 +27,26 @@ defmodule SymphonyElixir.DaemonWake do
           | :missing_workpad_anchor
           | :missing_created_at
           | :duplicate_titled_comments
-          | :unresolved_comment_titles
   @type config :: %{
           optional(:daemon_states) => [String.t()] | MapSet.t(),
           optional(:daemon_dispatch_states) => [String.t()] | MapSet.t(),
           optional(:terminal_states) => [String.t()] | MapSet.t(),
           optional(:daemon_default_wake) => String.t(),
-          optional(:daemon_workpad_title) => String.t(),
-          optional(:orchestrator_workpad_title) => String.t()
+          optional(:symphony_workpad_title) => String.t()
         }
   @type t :: %__MODULE__{
           status: status(),
           next_wake_at: DateTime.t() | nil,
           blockers: [Issue.blocker_ref()],
           warnings: [warning()],
-          unresolved_comment_ids: [String.t()],
           startup_stagger_ms: non_neg_integer()
         }
+
+  @spec workpad_title(config()) :: String.t()
+  def workpad_title(%{} = config) do
+    config_value(config, :symphony_workpad_title, @default_workpad_title)
+    |> normalize_workpad_title()
+  end
 
   @spec evaluate(Issue.t(), DateTime.t(), config(), keyword()) :: t()
   def evaluate(%Issue{} = issue, %DateTime{} = now, %{} = config, opts \\ []) do
@@ -101,7 +104,7 @@ defmodule SymphonyElixir.DaemonWake do
   defp evaluate_timer(issue, now, config, opts) do
     {cadence, cadence_warnings} = resolve_cadence(issue.labels, config)
 
-    case resolve_anchor(issue, config) do
+    case resolve_anchor(issue) do
       {:ok, anchor_id, anchor_at, anchor_warnings} ->
         jitter_fun = Keyword.get(opts, :jitter_fun, &deterministic_jitter_seconds/4)
         jitter_seconds = jitter_fun.(issue, anchor_id, cadence, anchor_at)
@@ -126,13 +129,6 @@ defmodule SymphonyElixir.DaemonWake do
 
       {:error, warning} ->
         %__MODULE__{status: :invalid, warnings: cadence_warnings ++ [warning]}
-
-      {:unresolved, comment_ids} ->
-        %__MODULE__{
-          status: :invalid,
-          warnings: cadence_warnings ++ [:unresolved_comment_titles],
-          unresolved_comment_ids: comment_ids
-        }
     end
   end
 
@@ -184,46 +180,23 @@ defmodule SymphonyElixir.DaemonWake do
   defp supported_wake_label?("wake:" <> cadence), do: Map.has_key?(@supported_wakes, cadence)
   defp supported_wake_label?(_label), do: false
 
-  defp resolve_anchor(issue, config) do
-    titles = anchor_titles(config)
-
-    titled_comments =
+  defp resolve_anchor(issue) do
+    anchor_comments =
       issue.comments
       |> Enum.map(fn comment ->
-        title = comment_title(comment)
-        updated_at = comment_updated_at(comment)
-
-        {comment, title, updated_at}
+        {comment, comment_updated_at(comment)}
       end)
-      |> Enum.filter(fn {_comment, _title, updated_at} -> not is_nil(updated_at) end)
-
-    unresolved_comments =
-      titled_comments
-      |> Enum.filter(fn {_comment, title, _updated_at} -> is_nil(title) end)
-
-    unresolved_comment_ids =
-      unresolved_comments
-      |> Enum.map(fn {comment, _title, _updated_at} -> comment_id(comment) end)
-      |> Enum.reject(&is_nil/1)
-
-    matches =
-      titled_comments
-      |> Enum.filter(fn {_comment, title, _updated_at} -> MapSet.member?(titles, title) end)
-      |> Enum.map(fn {comment, _title, _updated_at} -> comment end)
-      |> Enum.sort_by(&comment_updated_at/1, {:desc, DateTime})
+      |> Enum.reject(fn {_comment, updated_at} -> is_nil(updated_at) end)
+      |> Enum.map(fn {comment, _updated_at} -> comment end)
 
     duplicate_warning =
-      if duplicate_titles?(matches), do: [:duplicate_titled_comments], else: []
+      if length(anchor_comments) > 1, do: [:duplicate_titled_comments], else: []
 
-    cond do
-      unresolved_comments != [] ->
-        {:unresolved, unresolved_comment_ids}
-
-      matches != [] ->
-        comment = List.first(matches)
+    case anchor_comments do
+      [comment | _rest] ->
         {:ok, comment_id(comment), comment_updated_at(comment), duplicate_warning}
 
-      true ->
+      [] ->
         case issue.created_at do
           %DateTime{} = created_at ->
             {:ok, nil, created_at, [:missing_workpad_anchor]}
@@ -233,44 +206,6 @@ defmodule SymphonyElixir.DaemonWake do
         end
     end
   end
-
-  defp duplicate_titles?(comments) do
-    comments
-    |> Enum.map(&comment_title/1)
-    |> Enum.frequencies()
-    |> Enum.any?(fn {_title, count} -> count > 1 end)
-  end
-
-  defp anchor_titles(config) do
-    [
-      config_value(config, :daemon_workpad_title, "## Codex Workpad"),
-      config_value(config, :orchestrator_workpad_title, "## Symphony Orchestrator Workpad")
-    ]
-    |> Enum.map(&normalize_title/1)
-    |> Enum.reject(&is_nil/1)
-    |> MapSet.new()
-  end
-
-  defp comment_title(comment) do
-    case map_value(comment, :title, "title") do
-      title when is_binary(title) ->
-        normalize_title(title)
-
-      _title ->
-        comment
-        |> map_value(:body, "body")
-        |> title_from_body()
-    end
-  end
-
-  defp title_from_body(body) when is_binary(body) do
-    body
-    |> String.split("\n", parts: 2)
-    |> List.first()
-    |> normalize_title()
-  end
-
-  defp title_from_body(_body), do: nil
 
   defp comment_updated_at(comment) do
     comment
@@ -310,12 +245,16 @@ defmodule SymphonyElixir.DaemonWake do
     |> String.replace_prefix("wake:", "")
   end
 
-  defp normalize_title(title) when is_binary(title) do
+  defp normalize_workpad_title(title) when is_binary(title) do
     title
     |> String.trim()
+    |> case do
+      "" -> @default_workpad_title
+      title -> title
+    end
   end
 
-  defp normalize_title(_title), do: nil
+  defp normalize_workpad_title(_title), do: @default_workpad_title
 
   defp normalize_string(value) when is_binary(value) do
     value

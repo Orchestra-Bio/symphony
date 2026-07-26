@@ -8,15 +8,21 @@ defmodule SymphonyElixir.DaemonWakeTest do
     daemon_dispatch_states: ["evaluating"],
     terminal_states: ["done", "canceled"],
     daemon_default_wake: "4h",
-    daemon_workpad_title: "## Codex Workpad",
-    orchestrator_workpad_title: "## Symphony Orchestrator Workpad"
+    symphony_workpad_title: "## Symphony Workpad"
   }
 
-  test "timer due wakes daemon from titled workpad anchor" do
+  test "workpad title returns one server-side filter heading" do
+    assert DaemonWake.workpad_title(@config) == "## Symphony Workpad"
+
+    assert DaemonWake.workpad_title(%{@config | symphony_workpad_title: " ## Custom Workpad "}) ==
+             "## Custom Workpad"
+  end
+
+  test "timer due wakes daemon from filtered Symphony workpad anchor" do
     issue =
       issue(%{
         labels: ["wake:1h"],
-        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
       })
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config, jitter_fun: zero_jitter())
@@ -30,7 +36,7 @@ defmodule SymphonyElixir.DaemonWakeTest do
     issue =
       issue(%{
         labels: ["wake:1h"],
-        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
       })
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 09:30:00Z], @config, jitter_fun: zero_jitter())
@@ -54,27 +60,11 @@ defmodule SymphonyElixir.DaemonWakeTest do
     assert decision.warnings == [:missing_workpad_anchor]
   end
 
-  test "metadata-only comments signal unresolved titles instead of created_at fallback" do
-    issue =
-      issue(%{
-        labels: [],
-        comments: [%{id: "comment-1", updated_at: ~U[2026-07-26 09:00:00Z]}],
-        created_at: ~U[2026-07-26 01:00:00Z]
-      })
-
-    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config, jitter_fun: zero_jitter())
-
-    assert decision.status == :invalid
-    assert decision.next_wake_at == nil
-    assert decision.warnings == [:unresolved_comment_titles]
-    assert decision.unresolved_comment_ids == ["comment-1"]
-  end
-
   test "conflicting wake labels use default cadence and never wake immediately" do
     issue =
       issue(%{
         labels: ["wake:15m", "wake:1h"],
-        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
       })
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 10:00:00Z], @config, jitter_fun: zero_jitter())
@@ -88,13 +78,20 @@ defmodule SymphonyElixir.DaemonWakeTest do
     issue =
       issue(%{
         labels: ["wake:1h"],
-        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
       })
 
     jitter = DaemonWake.deterministic_jitter_seconds(issue, "daemon-comment", "1h", ~U[2026-07-26 09:00:00Z])
 
     assert jitter in [-60, -30, 0, 30, 60]
-    assert jitter == DaemonWake.deterministic_jitter_seconds(issue, "daemon-comment", "1h", ~U[2026-07-26 09:00:00Z])
+
+    assert jitter ==
+             DaemonWake.deterministic_jitter_seconds(
+               issue,
+               "daemon-comment",
+               "1h",
+               ~U[2026-07-26 09:00:00Z]
+             )
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 09:30:00Z], @config)
 
@@ -104,13 +101,13 @@ defmodule SymphonyElixir.DaemonWakeTest do
              |> DateTime.add(jitter, :second)
   end
 
-  test "duplicate titled comments warn and use the latest updated_at anchor" do
+  test "duplicate workpad anchor refs warn and use the query's first anchor" do
     issue =
       issue(%{
         labels: ["wake:1h"],
         comments: [
-          comment("old", ~U[2026-07-26 08:00:00Z], "## Codex Workpad"),
-          comment("new", ~U[2026-07-26 09:45:00Z], "## Codex Workpad")
+          comment("new", ~U[2026-07-26 09:45:00Z]),
+          comment("old", ~U[2026-07-26 08:00:00Z])
         ]
       })
 
@@ -125,7 +122,7 @@ defmodule SymphonyElixir.DaemonWakeTest do
     issue =
       issue(%{
         blocked_by: [%{identifier: "ABC-100", state: "In Progress"}],
-        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
       })
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 14:00:00Z], @config, jitter_fun: zero_jitter())
@@ -148,14 +145,12 @@ defmodule SymphonyElixir.DaemonWakeTest do
     assert DaemonWake.stagger_due(sleeping, ~U[2026-07-26 10:00:00Z], 60_000) == sleeping
   end
 
-  test "new comments do not wake daemons before the timer is due" do
+  test "new comments do not wake daemons before the filtered anchor timer is due" do
     issue =
       issue(%{
         labels: ["wake:1h"],
-        comments: [
-          comment("daemon-comment", ~U[2026-07-26 09:00:00Z], "## Codex Workpad"),
-          comment("human-comment", ~U[2026-07-26 09:59:00Z], "## Human Note")
-        ]
+        updated_at: ~U[2026-07-26 09:59:00Z],
+        comments: [comment("daemon-comment", ~U[2026-07-26 09:00:00Z])]
       })
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 09:30:00Z], @config, jitter_fun: zero_jitter())
@@ -169,7 +164,7 @@ defmodule SymphonyElixir.DaemonWakeTest do
       issue(%{
         labels: ["wake:1h"],
         updated_at: ~U[2026-07-26 09:59:00Z],
-        comments: [comment("daemon-comment", ~U[2026-07-26 08:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 08:00:00Z])]
       })
 
     decision = DaemonWake.evaluate(issue, ~U[2026-07-26 09:30:00Z], @config, jitter_fun: zero_jitter())
@@ -183,7 +178,7 @@ defmodule SymphonyElixir.DaemonWakeTest do
       issue(%{
         state: "Legacy Evaluating",
         labels: ["wake:15m"],
-        comments: [comment("daemon-comment", ~U[2026-07-26 08:00:00Z], "## Codex Workpad")]
+        comments: [comment("daemon-comment", ~U[2026-07-26 08:00:00Z])]
       })
 
     config = %{@config | daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]}
@@ -206,8 +201,8 @@ defmodule SymphonyElixir.DaemonWakeTest do
     struct(Issue, Map.merge(defaults, attrs))
   end
 
-  defp comment(id, updated_at, title) do
-    %{id: id, updated_at: updated_at, body: title <> "\n\nbody"}
+  defp comment(id, updated_at) do
+    %{id: id, updated_at: updated_at}
   end
 
   defp zero_jitter do
