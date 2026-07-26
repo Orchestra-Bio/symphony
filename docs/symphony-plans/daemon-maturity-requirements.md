@@ -109,7 +109,8 @@ Local workflow and review sources:
   setup an operator-owned prerequisite.
 - Linear issue `ABC-296` / `DMAT-014`, read through Symphony Linear GraphQL on
   2026-07-25. It is the human-directed replan pass that records the decisions
-  above in the canonical documents.
+  above and the Item 12 plural `daemon_dispatch_states` decision in the
+  canonical documents.
 
 Repo context:
 
@@ -147,7 +148,8 @@ handoffs.
 - `S14`: Linear issue `ABC-282` / `DMAT-002` verification work.
 - `S15`: Linear issue `ABC-283` / `DMAT-003` cancellation decision.
 - `S16`: Linear issues `ABC-292` / `DMAT-012` and `ABC-295` / `DMAT-013`.
-- `S17`: Linear issue `ABC-296` / `DMAT-014` replan direction.
+- `S17`: Linear issue `ABC-296` / `DMAT-014` replan direction, including the
+  Item 12 plural `daemon_dispatch_states` decision.
 
 ## Goal
 
@@ -160,8 +162,8 @@ spec-first, reviewable, and compatible with later upstream adoption discussions.
 Daemon tickets add the clock: dispatch eligibility becomes `f(snapshot, now)`.
 They sleep, wake on timer, evaluate the world idempotently, land in Happy or
 Unhappy verdict states, and leave ordinary comments when something else needs
-attention. Urgent wake is a state write to the daemon dispatch state, not a
-comment-triggered wake. [S3, S4, S6, S12]
+attention. Urgent wake is a state write to the first configured daemon dispatch
+state, not a comment-triggered wake. [S3, S4, S6, S12, S17]
 
 Maturity-gated dependencies add upstream maturity: blocked depth-2-and-deeper
 DAG tickets can dispatch when their direct blockers carry a configured maturity
@@ -230,8 +232,9 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 Add a configured daemon state class alongside active and terminal states. Under
 the minimal state model, the daemon resting states are Happy and Unhappy. A
 daemon-state ticket is not dispatched through the normal active-ticket path
-until it wakes and is flipped to the configured daemon dispatch state, which is
-also listed in `tracker.active_states`. [S3, S4, S6, S12]
+until it wakes and is flipped to the first configured daemon dispatch state.
+Every configured daemon dispatch state is also listed in `tracker.active_states`
+and is recognized for daemon identity and recovery. [S3, S4, S6, S12, S17]
 
 ### R2. Daemon Wake Eligibility
 
@@ -239,8 +242,8 @@ A daemon wakes when its timer is due. The timer is computed from the daemon's
 own titled workpad comment `updatedAt`, the `wake:*` cadence label, and jitter.
 Comments never cause wake eligibility; comments left while a daemon sleeps are
 informational deposits for the next scheduled evaluation. Urgency is expressed
-by moving the daemon ticket to the daemon dispatch state. Evaluation must
-re-read the world at evaluation time. [S3, S4, S6, S12]
+by moving the daemon ticket to the first configured daemon dispatch state.
+Evaluation must re-read the world at evaluation time. [S3, S4, S6, S12, S17]
 
 ### R3. Daemon Restart Tolerance And Jitter
 
@@ -281,10 +284,10 @@ a real blocker for another ticket. [S3, S4, S5, S6]
 ### R7. Daemon Lease At Dispatch
 
 When a poll decides to wake a daemon, the orchestrator's precondition of
-dispatch is the flip to the daemon dispatch state. A daemon in that dispatch
-state is not wake-eligible; if the evaluation crashes, normal active-ticket
-dispatch re-dispatches it and the idempotent evaluator re-derives the verdict.
-[S3, S4, S6, S12]
+dispatch is the flip to the first configured daemon dispatch state. A daemon in
+any configured dispatch state is not wake-eligible; if the evaluation crashes,
+normal active-ticket dispatch re-dispatches it and the idempotent evaluator
+re-derives the verdict. [S3, S4, S6, S12, S17]
 
 ### R8. Daemon Failure Handling
 
@@ -342,10 +345,11 @@ S11]
 
 The fork also consumes configured Linear state and label names. Creating those
 workflow states and labels on the target Linear team is external operator work
-owned by `DMAT-013`: `daemon_states`, `daemon_dispatch_state`, and
-`maturity_labels` are strings; wake and maturity logic can be tested from pure
-snapshots; and `maturity_labels: []` reproduces upstream behavior. Real use and
-the deployment switchover require the team configuration to exist, but
+owned by `DMAT-013`: `daemon_states`, `daemon_dispatch_states`, and
+`maturity_labels` are configured string sets; wake and maturity logic can be
+tested from pure snapshots; and `maturity_labels: []` reproduces upstream
+behavior. Real use and the deployment switchover require the team configuration
+to exist, but
 implementation and tests must not block on the ABC team already having those
 states or labels. [S12, S16, S17]
 
@@ -410,10 +414,11 @@ evidence. [S1, S7, S15]
 
 Recurring work must not be able to occupy the whole dispatch pool while
 implementation work is eligible. This is satisfied by configuration rather than
-new engine behavior: daemon evaluations run in a dedicated dispatch state, and
-`agent.max_concurrent_agents_by_state` caps that state. Ceilings only; no
-reserved floors for recurring work. Status reporting is per-state running
-counts, using the status surface that already reports running work. [S12]
+new engine behavior: daemon evaluations run in configured daemon dispatch
+states, and `agent.max_concurrent_agents_by_state` caps each such state.
+Ceilings only; no reserved floors for recurring work. Status reporting is
+per-state running counts, using the status surface that already reports running
+work. [S12, S17]
 
 ## Verification Backlog And Open Questions
 
@@ -492,7 +497,7 @@ The `daemon-maturity` project is done only when all of the following are true:
 - Phase-1 maturity-gate tests prove unknown or experimental stack labels do not
   make a dependent eligible before the maturity gate is satisfied. [S5, S11]
 - Per-state concurrency budget tests prove daemon evaluations are capped by the
-  configured daemon dispatch state and cannot occupy the whole dispatch pool
+  configured daemon dispatch states and cannot occupy the whole dispatch pool
   while implementation work is eligible. [S12]
 - Required Linear team configuration exists for real use and switchover, or
   `DMAT-013` records the exact missing operator setup. Implementation tests do

@@ -58,8 +58,9 @@ Authoritative project sources:
   late `DIVERGENCES.md` content, maturity-gate rollout scope, and real-use
   validation.
 - Linear issue `ABC-296` / `DMAT-014` from 2026-07-25, including the "Two
-  additions - do not split this ticket" comment and PR #9 rework review. This is
-  the replan source that folds PR decisions, ticket cancellations, and manually
+  additions - do not split this ticket" comment, the Item 12 plural
+  `daemon_dispatch_states` decision, and PR #9 rework review. This is the
+  replan source that folds PR decisions, ticket cancellations, and manually
   added tickets back into the canonical requirements, design, and plan.
 - Linear issue `ABC-283` / `DMAT-003` cancellation comment from 2026-07-25.
   This cancels tree-equality CI as premature while retaining the fork `main`
@@ -166,8 +167,12 @@ Unavailable sources: none.
   global guardrail against editing `SPEC.md` protects fork divergence records.
   Cookbook material remains outside `DIVERGENCES.md`.
 - The tracker config surface for this phase is
-  `daemon_states`, `daemon_dispatch_state`, `daemon_default_wake`, and
+  `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`, and
   `maturity_labels`. Do not add `daemon_label` or class-budget config.
+- The first configured `daemon_dispatch_states` element is the daemon lease
+  write target. All configured elements are recognized for daemon identity,
+  crash recovery, and exclusion from implementation-class dispatch, making a
+  rename window expressible without another migration rule.
 - PR #3 review decision D-C adds one maturity-gate rollout field,
   `maturity_gate_state_scope`, defaulting to `["todo"]`. This is a switch-risk
   reducer, not class-budget config.
@@ -180,16 +185,18 @@ Unavailable sources: none.
   the team configuration to exist.
 - Recurring-work budget is satisfied by the existing
   `agent.max_concurrent_agents_by_state` cap on the daemon dispatch state.
-  Ceilings only; no floors.
+  Ceilings only; no floors. Multiple daemon dispatch states would each carry
+  their own per-state cap.
 - A daemon wakes by timer only. Comments never cause daemon wake eligibility.
-  Urgency is a state write to `daemon_dispatch_state`.
+  Urgency is a state write to the first configured
+  `daemon_dispatch_states` element.
 - The wake anchor is the later `updatedAt` of the daemon's own titled workpad
   comment and the orchestrator's own titled workpad comment. `Comment.updatedAt`
   exists and advances on edit; do not reopen that platform verification.
 - The engine currently has `SymphonyElixir.Linear.Adapter.create_comment/2`, no
   `commentUpdate`, and no comment read path in the poll query.
 - Daemon lease-at-dispatch is the orchestrator flipping the ticket to
-  `daemon_dispatch_state`, not `Active`.
+  the first configured `daemon_dispatch_states` element, not `Active`.
 - Daemon retry exhaustion parks the daemon by editing the orchestrator's own
   titled comment with an unevaluated verdict; a later real daemon verdict
   supersedes the park.
@@ -217,7 +224,7 @@ Do not fan out implementation work for:
 - `stack:*` per-ticket overrides. This is deferred; the open question is
   whether the maturity point means AI review, human review, or another signal.
 - Class-based concurrency budgets. The recurring-work budget is satisfied by
-  `agent.max_concurrent_agents_by_state` on the daemon dispatch state.
+  `agent.max_concurrent_agents_by_state` on each daemon dispatch state.
 - Engine-side `max_stack_depth` enforcement. Default depth `3` is a plan-side
   constraint; the gate stays depth-agnostic.
 - Hook environment metadata, one-orchestrator-per-team, and `branch_name`
@@ -727,7 +734,7 @@ acceptance_checks:
   required shape and ABC actuals.
 - Every ABC actual state and label exists on the team with the documented
   category/type, verified by query.
-- The daemon dispatch state name is recorded.
+- The daemon dispatch state names are recorded.
 - Legacy states and labels are untouched.
 
 split_criteria:
@@ -782,7 +789,7 @@ source_notes:
 - Design sections for config, state taxonomy, recurring-work budget, and
   blocker snapshot shape.
 - This item owns the four tracker config fields named in the requirements:
-  `daemon_states`, `daemon_dispatch_state`, `daemon_default_wake`, and
+  `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`, and
   `maturity_labels`.
 
 dependencies:
@@ -815,12 +822,14 @@ initial_labels:
 required_actions:
 
 - Add typed config fields for `tracker.daemon_states`,
-  `tracker.daemon_dispatch_state`, `tracker.daemon_default_wake`, and
+  `tracker.daemon_dispatch_states`, `tracker.daemon_default_wake`, and
   `tracker.maturity_labels` using existing schema patterns.
 - Add helper accessors through `SymphonyElixir.Config` instead of ad-hoc env
   reads.
-- Validate disjointness between daemon states, daemon dispatch state, active
-  states, and terminal states according to the design.
+- Validate disjointness between daemon states, daemon dispatch states, active
+  states, and terminal states according to the design. Validate every dispatch
+  state against configured active states, and require a non-empty
+  `daemon_dispatch_states` set when `daemon_states` is non-empty.
 - Preserve existing defaults when new config is absent; daemon/maturity
   behavior must be inert unless configured data makes it applicable.
 - Extend `SymphonyElixir.Linear.Issue` or supporting structs for normalized
@@ -832,8 +841,8 @@ acceptance_checks:
 
 - Tests prove workflows that omit daemon/maturity fields retain existing
   behavior.
-- Tests prove daemon states, daemon dispatch state, maturity labels, and default
-  wake values are normalized and validated.
+- Tests prove daemon states, daemon dispatch states, maturity labels, and
+  default wake values are normalized and validated.
 - Tests prove no `daemon_label` or class-budget config is accepted.
 - Targeted validation includes new tests and `make -C elixir specs.check`.
 
@@ -1062,8 +1071,9 @@ ownership: Symphony implementation agent; human reviewer Jeremy Carroll; target
 repository `Orchestra-Bio/symphony`.
 
 scope: Own the central daemon lifecycle wiring in the orchestrator: sleep
-candidate evaluation, lease-at-dispatch flip to `daemon_dispatch_state`,
-daemon-dispatch-state crash recovery, per-state daemon dispatch cap
+candidate evaluation, lease-at-dispatch flip to the first configured
+`daemon_dispatch_states` element, daemon-dispatch-state crash recovery,
+per-state daemon dispatch cap
 visibility, finite retry exhaustion, and orchestrator-authored unevaluated
 workpad parks. This ticket does not implement maturity-gate dispatch.
 
@@ -1133,11 +1143,11 @@ required_actions:
 
 - Fetch daemon sleep candidates and evaluate them with the pure timer-only wake
   helper.
-- Before dispatching a due daemon, write the lease by moving it to
-  `daemon_dispatch_state`, then re-fetch and dispatch through active-state
-  machinery.
-- Ensure implementation-class dispatch excludes `daemon_dispatch_state` while
-  daemon dispatch still counts against that state's
+- Before dispatching a due daemon, write the lease by moving it to the first
+  configured `daemon_dispatch_states` element, then re-fetch and dispatch
+  through active-state machinery.
+- Ensure implementation-class dispatch excludes `daemon_dispatch_states` while
+  daemon dispatch still counts against each dispatch state's
   `max_concurrent_agents_by_state` cap.
 - Add finite daemon retry exhaustion and park exhausted daemon evaluations by
   editing the orchestrator's own titled workpad comment with
@@ -1513,8 +1523,8 @@ required_actions:
 - Create root `DIVERGENCES.md` after daemon lifecycle and maturity-gate behavior
   settles.
 - Include only implemented daemon/maturity divergence areas: daemon states and
-  timer-only wake semantics, titled workpad anchors, the daemon dispatch state
-  and per-state budget, the daemon lease flip and exhaustion park,
+  timer-only wake semantics, titled workpad anchors, daemon dispatch states and
+  per-state budget, the daemon lease flip and exhaustion park,
   maturity-gated dependency dispatch, the blocker-gate state-scope rollout, and
   the hardcoded `Todo` blocker gate replacement, plus team-scoped dispatch when
   `DMAT-012` has landed as durable fork behavior.
@@ -1567,7 +1577,7 @@ exclusions:
 - Lease and restart-recovery tests pass: dispatch-state lease, crash after
   lease re-dispatch, crash during evaluation retry, finite retry exhaustion
   park, and later real verdict superseding park.
-- Per-state concurrency tests prove daemon evaluations are capped by the daemon
+- Per-state concurrency tests prove daemon evaluations are capped by each daemon
   dispatch state through `agent.max_concurrent_agents_by_state`.
 - Maturity gate tests cover direct blocker labels, empty config terminal-only
   behavior, default `maturity_gate_state_scope: ["todo"]`, explicit scope
