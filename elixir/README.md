@@ -94,7 +94,7 @@ Minimal example:
 ---
 tracker:
   kind: linear
-  project_slug: "..."
+  team_key: ABC
 workspace:
   root: ~/code/workspaces
 hooks:
@@ -115,6 +115,9 @@ Title: {{ issue.title }} Body: {{ issue.description }}
 Notes:
 
 - If a value is missing, defaults are used.
+- Linear workflows must set either `tracker.team_key` to process active issues for a team or
+  `tracker.project_slug` to limit polling to a single Linear project. When both are set,
+  `project_slug` takes precedence.
 - `tracker.required_labels` is optional. When set, an issue must have every
   configured label to dispatch or continue running. Label matching ignores
   case and surrounding whitespace. A blank configured label matches no issue.

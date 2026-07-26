@@ -43,7 +43,16 @@ defmodule SymphonyElixir.CoreTest do
       tracker_project_slug: nil
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_issue_selector} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_api_token: "token",
+      tracker_project_slug: nil,
+      tracker_team_key: "ABC"
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().tracker.team_key == "ABC"
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "   ",
@@ -57,7 +66,7 @@ defmodule SymphonyElixir.CoreTest do
       tracker_project_slug: ""
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_issue_selector} = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_project_slug: "project",
@@ -116,7 +125,7 @@ defmodule SymphonyElixir.CoreTest do
     tracker = Map.get(config, "tracker", %{})
     assert is_map(tracker)
     assert Map.get(tracker, "kind") == "linear"
-    assert is_binary(Map.get(tracker, "project_slug"))
+    assert is_binary(Map.get(tracker, "project_slug")) or is_binary(Map.get(tracker, "team_key"))
     assert is_list(Map.get(tracker, "active_states"))
     assert is_list(Map.get(tracker, "terminal_states"))
 
@@ -286,7 +295,7 @@ defmodule SymphonyElixir.CoreTest do
 
     previous_trap_exit = Process.flag(:trap_exit, true)
 
-    assert {:error, :missing_linear_project_slug} =
+    assert {:error, :missing_linear_issue_selector} =
              Orchestrator.start_link(name: orchestrator_name)
 
     Process.flag(:trap_exit, previous_trap_exit)
@@ -324,7 +333,7 @@ defmodule SymphonyElixir.CoreTest do
       tracker_project_slug: nil
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_linear_issue_selector} = Config.validate!()
     assert Config.settings!().tracker.kind == "memory"
 
     Process.exit(original_orchestrator_pid, :kill)
@@ -1167,8 +1176,163 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  defp with_linear_poll_stub(response_nodes, fun) when is_list(response_nodes) and is_function(fun, 1) do
+    parent = self()
+
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {_ip, port}} = :inet.sockname(listen_socket)
+
+    task =
+      Task.async(fn ->
+        {:ok, socket} = :gen_tcp.accept(listen_socket, 5_000)
+        {:ok, payload} = receive_http_payload(socket)
+        send(parent, {:linear_poll_request, Jason.decode!(payload)})
+
+        body =
+          Jason.encode!(%{
+            "data" => %{
+              "issues" => %{
+                "nodes" => response_nodes,
+                "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+              }
+            }
+          })
+
+        response = [
+          "HTTP/1.1 200 OK\r\n",
+          "content-type: application/json\r\n",
+          "content-length: #{byte_size(body)}\r\n",
+          "connection: close\r\n",
+          "\r\n",
+          body
+        ]
+
+        :ok = :gen_tcp.send(socket, response)
+        :gen_tcp.close(socket)
+      end)
+
+    try do
+      fun.("http://127.0.0.1:#{port}")
+      Task.await(task, 5_000)
+    after
+      :gen_tcp.close(listen_socket)
+      Task.shutdown(task, :brutal_kill)
+    end
+  end
+
+  defp receive_http_payload(socket), do: receive_http_payload(socket, "")
+
+  defp receive_http_payload(socket, acc) do
+    case complete_http_payload(acc) do
+      {:ok, payload} ->
+        {:ok, payload}
+
+      :more ->
+        with {:ok, chunk} <- :gen_tcp.recv(socket, 0, 5_000) do
+          receive_http_payload(socket, acc <> chunk)
+        end
+    end
+  end
+
+  defp complete_http_payload(request) do
+    case :binary.match(request, "\r\n\r\n") do
+      {header_end, 4} ->
+        body_start = header_end + 4
+        headers = binary_part(request, 0, header_end)
+        body = binary_part(request, body_start, byte_size(request) - body_start)
+        content_length = http_content_length(headers)
+
+        if byte_size(body) >= content_length do
+          {:ok, binary_part(body, 0, content_length)}
+        else
+          :more
+        end
+
+      :nomatch ->
+        :more
+    end
+  end
+
+  defp http_content_length(headers) do
+    headers
+    |> String.split("\r\n")
+    |> Enum.find_value(0, &http_content_length_header/1)
+  end
+
+  defp http_content_length_header(header) do
+    case String.split(header, ":", parts: 2) do
+      [name, value] -> parse_content_length_header(String.downcase(name), value)
+      _ -> nil
+    end
+  end
+
+  defp parse_content_length_header("content-length", value), do: String.trim(value) |> String.to_integer()
+  defp parse_content_length_header(_name, _value), do: nil
+
+  defp raw_linear_issue(overrides \\ %{}) do
+    Map.merge(
+      %{
+        "id" => "issue-1",
+        "identifier" => "ABC-292",
+        "title" => "Team-scoped issue",
+        "description" => "Ready for Symphony",
+        "priority" => 2,
+        "state" => %{"name" => "Todo"},
+        "branchName" => "abc-292",
+        "url" => "https://linear.app/orchestrabio/issue/ABC-292/example",
+        "labels" => %{"nodes" => []},
+        "inverseRelations" => %{"nodes" => []},
+        "createdAt" => "2026-07-25T00:00:00Z",
+        "updatedAt" => "2026-07-25T00:01:00Z"
+      },
+      overrides
+    )
+  end
+
   test "fetch issues by states with empty state set is a no-op" do
     assert {:ok, []} = Client.fetch_issues_by_states([])
+  end
+
+  test "linear polling can select candidate issues by team key" do
+    with_linear_poll_stub([raw_linear_issue()], fn endpoint ->
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_endpoint: endpoint,
+        tracker_project_slug: nil,
+        tracker_team_key: " ABC ",
+        tracker_active_states: ["Todo", "Rework"]
+      )
+
+      assert {:ok, [%Issue{identifier: "ABC-292", state: "Todo"}]} = Client.fetch_candidate_issues()
+    end)
+
+    assert_receive {:linear_poll_request, %{"query" => query, "variables" => variables}}
+    assert query =~ "SymphonyLinearPollByTeam"
+    assert query =~ "team: {key: {eq: $teamKey}}"
+    assert variables["teamKey"] == "ABC"
+    assert variables["stateNames"] == ["Todo", "Rework"]
+    refute Map.has_key?(variables, "projectSlug")
+  end
+
+  test "linear polling keeps project slug precedence when both selectors are configured" do
+    with_linear_poll_stub([], fn endpoint ->
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_endpoint: endpoint,
+        tracker_project_slug: " project ",
+        tracker_team_key: "ABC",
+        tracker_active_states: ["Todo"]
+      )
+
+      assert {:ok, []} = Client.fetch_candidate_issues()
+    end)
+
+    assert_receive {:linear_poll_request, %{"query" => query, "variables" => variables}}
+    assert query =~ "SymphonyLinearPollByProject"
+    assert query =~ "project: {slugId: {eq: $projectSlug}}"
+    assert variables["projectSlug"] == "project"
+    assert variables["stateNames"] == ["Todo"]
+    refute Map.has_key?(variables, "teamKey")
   end
 
   test "prompt builder renders issue and attempt values from workflow template" do

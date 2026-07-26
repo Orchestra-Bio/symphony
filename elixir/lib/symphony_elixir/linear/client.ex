@@ -5,13 +5,12 @@ defmodule SymphonyElixir.Linear.Client do
 
   require Logger
   alias SymphonyElixir.{Config, Linear.Issue}
+  alias SymphonyElixir.Config.Schema.Tracker, as: TrackerConfig
 
   @issue_page_size 50
   @max_error_body_log_bytes 1_000
 
-  @query """
-  query SymphonyLinearPoll($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
-    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+  @issue_page_fields """
       nodes {
         id
         identifier
@@ -50,6 +49,20 @@ defmodule SymphonyElixir.Linear.Client do
         hasNextPage
         endCursor
       }
+  """
+
+  @query_by_project """
+  query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+  #{@issue_page_fields}
+    }
+  }
+  """
+
+  @query_by_team """
+  query SymphonyLinearPollByTeam($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
+  #{@issue_page_fields}
     }
   }
   """
@@ -106,42 +119,34 @@ defmodule SymphonyElixir.Linear.Client do
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do
     tracker = Config.settings!().tracker
-    project_slug = tracker.project_slug
 
-    cond do
-      is_nil(tracker.api_key) ->
-        {:error, :missing_linear_api_token}
-
-      is_nil(project_slug) ->
-        {:error, :missing_linear_project_slug}
-
-      true ->
-        with {:ok, assignee_filter} <- routing_assignee_filter() do
-          do_fetch_by_states(project_slug, tracker.active_states, assignee_filter)
-        end
+    if Config.present_string?(tracker.api_key) do
+      with {:ok, selector} <- issue_selector(tracker),
+           {:ok, assignee_filter} <- routing_assignee_filter() do
+        do_fetch_by_states(selector, tracker.active_states, assignee_filter)
+      end
+    else
+      {:error, :missing_linear_api_token}
     end
   end
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_states(state_names) when is_list(state_names) do
     normalized_states = Enum.map(state_names, &to_string/1) |> Enum.uniq()
+    fetch_issues_by_normalized_states(normalized_states)
+  end
 
-    if normalized_states == [] do
-      {:ok, []}
-    else
-      tracker = Config.settings!().tracker
-      project_slug = tracker.project_slug
+  defp fetch_issues_by_normalized_states([]), do: {:ok, []}
 
-      cond do
-        is_nil(tracker.api_key) ->
-          {:error, :missing_linear_api_token}
+  defp fetch_issues_by_normalized_states(normalized_states) do
+    tracker = Config.settings!().tracker
 
-        is_nil(project_slug) ->
-          {:error, :missing_linear_project_slug}
-
-        true ->
-          do_fetch_by_states(project_slug, normalized_states, nil)
+    if Config.present_string?(tracker.api_key) do
+      with {:ok, selector} <- issue_selector(tracker) do
+        do_fetch_by_states(selector, normalized_states, nil)
       end
+    else
+      {:error, :missing_linear_api_token}
     end
   end
 
@@ -236,25 +241,30 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
-  defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
-    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
+  defp do_fetch_by_states(selector, state_names, assignee_filter) do
+    do_fetch_by_states_page(selector, state_names, assignee_filter, nil, [])
   end
 
-  defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
+  defp do_fetch_by_states_page(selector, state_names, assignee_filter, after_cursor, acc_issues) do
+    {query, selector_variables} = poll_query(selector)
+
     with {:ok, body} <-
-           graphql(@query, %{
-             projectSlug: project_slug,
-             stateNames: state_names,
-             first: @issue_page_size,
-             relationFirst: @issue_page_size,
-             after: after_cursor
-           }),
+           graphql(
+             query,
+             %{
+               stateNames: state_names,
+               first: @issue_page_size,
+               relationFirst: @issue_page_size,
+               after: after_cursor
+             }
+             |> Map.merge(selector_variables)
+           ),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
       updated_acc = prepend_page_issues(issues, acc_issues)
 
       case next_page_cursor(page_info) do
         {:ok, next_cursor} ->
-          do_fetch_by_states_page(project_slug, state_names, assignee_filter, next_cursor, updated_acc)
+          do_fetch_by_states_page(selector, state_names, assignee_filter, next_cursor, updated_acc)
 
         :done ->
           {:ok, finalize_paginated_issues(updated_acc)}
@@ -270,6 +280,22 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp finalize_paginated_issues(acc_issues) when is_list(acc_issues), do: Enum.reverse(acc_issues)
+
+  defp issue_selector(%TrackerConfig{} = tracker) do
+    cond do
+      Config.present_string?(tracker.project_slug) ->
+        {:ok, {:project_slug, tracker.project_slug}}
+
+      Config.present_string?(tracker.team_key) ->
+        {:ok, {:team_key, tracker.team_key}}
+
+      true ->
+        {:error, :missing_linear_issue_selector}
+    end
+  end
+
+  defp poll_query({:project_slug, project_slug}), do: {@query_by_project, %{projectSlug: project_slug}}
+  defp poll_query({:team_key, team_key}), do: {@query_by_team, %{teamKey: team_key}}
 
   defp do_fetch_issue_states(ids, assignee_filter) do
     do_fetch_issue_states(ids, assignee_filter, &graphql/2)
