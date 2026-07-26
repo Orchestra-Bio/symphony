@@ -93,6 +93,24 @@ Local workflow and review sources:
   supersede the earlier handoffs for daemon wake prods, daemon dispatch state,
   comment anchoring, and recurring-work concurrency. They are the
   human-decision source for the amendments to R2, R5, and R19.
+- GitHub PR #3 human review, decision comments, and approval review on
+  2026-07-25. These comments supersede earlier handoff and requirements text
+  for fan-out promotion state, late `DIVERGENCES.md` timing, real-use evidence,
+  and the `maturity_gate_state_scope` switch-risk reducer.
+- Linear issue `ABC-282` / `DMAT-002`, read through Symphony Linear GraphQL on
+  2026-07-25. Its verification work records the current retry blocker-helper
+  call sites, including dispatch-time revalidation.
+- Linear issue `ABC-283` / `DMAT-003`, read through Symphony Linear GraphQL on
+  2026-07-25. Jeremy Carroll canceled it as premature and retained only the
+  true-merge constraint for fork `main`.
+- Linear issues `ABC-292` / `DMAT-012` and `ABC-295` / `DMAT-013`, read
+  through Symphony Linear GraphQL on 2026-07-25. These establish
+  `tracker.team_key` as required switchover work and make team state/label
+  setup an operator-owned prerequisite.
+- Linear issue `ABC-296` / `DMAT-014`, read through Symphony Linear GraphQL on
+  2026-07-25. It is the human-directed replan pass that records the decisions
+  above and the Item 12 plural `daemon_dispatch_states` decision in the
+  canonical documents.
 
 Repo context:
 
@@ -125,6 +143,13 @@ handoffs.
   `45a53b8588a9650c2f424cb31a6495af1bc86727`.
 - `S11`: GitHub PR #1 human review and decision comments from 2026-07-25.
 - `S12`: GitHub PR #2 human review and handoff comments from 2026-07-25.
+- `S13`: GitHub PR #3 human review, decision comments D-A/D-B/D-C, and
+  approval review from 2026-07-25.
+- `S14`: Linear issue `ABC-282` / `DMAT-002` verification work.
+- `S15`: Linear issue `ABC-283` / `DMAT-003` cancellation decision.
+- `S16`: Linear issues `ABC-292` / `DMAT-012` and `ABC-295` / `DMAT-013`.
+- `S17`: Linear issue `ABC-296` / `DMAT-014` replan direction, including the
+  Item 12 plural `daemon_dispatch_states` decision.
 
 ## Goal
 
@@ -137,8 +162,8 @@ spec-first, reviewable, and compatible with later upstream adoption discussions.
 Daemon tickets add the clock: dispatch eligibility becomes `f(snapshot, now)`.
 They sleep, wake on timer, evaluate the world idempotently, land in Happy or
 Unhappy verdict states, and leave ordinary comments when something else needs
-attention. Urgent wake is a state write to the daemon dispatch state, not a
-comment-triggered wake. [S3, S4, S6, S12]
+attention. Urgent wake is a state write to the first configured daemon dispatch
+state, not a comment-triggered wake. [S3, S4, S6, S12, S17]
 
 Maturity-gated dependencies add upstream maturity: blocked depth-2-and-deeper
 DAG tickets can dispatch when their direct blockers carry a configured maturity
@@ -182,9 +207,9 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
   particular, S3's `next_wake_at` / `last_evaluated_at` tracker-metadata lease
   scheme is superseded and must not be implemented. [S4, S6, S11]
 - Fork `main` is a published artifact and must sync from upstream through true
-  merges, never through rebasing. [S3, S4]
-- A derived rebased branch may be force-pushed as a read-only artifact, but its
-  tree must stay equal to fork `main`; CI must fail loudly on drift. [S3, S4]
+  merges, never through rebasing. The derived rebased branch and tree-equality
+  CI are deferred until a real upstream adoption conversation exists. [S3, S4,
+  S15, S17]
 - `DIVERGENCES.md` is the adoption interface. It should stay flat and
   spec-level: one paragraph per divergence describing what changed, why, and
   what a compatible implementer must do. [S3, S4, S5]
@@ -207,8 +232,9 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 Add a configured daemon state class alongside active and terminal states. Under
 the minimal state model, the daemon resting states are Happy and Unhappy. A
 daemon-state ticket is not dispatched through the normal active-ticket path
-until it wakes and is flipped to the configured daemon dispatch state, which is
-also listed in `tracker.active_states`. [S3, S4, S6, S12]
+until it wakes and is flipped to the first configured daemon dispatch state.
+Every configured daemon dispatch state is also listed in `tracker.active_states`
+and is recognized for daemon identity and recovery. [S3, S4, S6, S12, S17]
 
 ### R2. Daemon Wake Eligibility
 
@@ -216,8 +242,8 @@ A daemon wakes when its timer is due. The timer is computed from the daemon's
 own titled workpad comment `updatedAt`, the `wake:*` cadence label, and jitter.
 Comments never cause wake eligibility; comments left while a daemon sleeps are
 informational deposits for the next scheduled evaluation. Urgency is expressed
-by moving the daemon ticket to the daemon dispatch state. Evaluation must
-re-read the world at evaluation time. [S3, S4, S6, S12]
+by moving the daemon ticket to the first configured daemon dispatch state.
+Evaluation must re-read the world at evaluation time. [S3, S4, S6, S12, S17]
 
 ### R3. Daemon Restart Tolerance And Jitter
 
@@ -258,10 +284,10 @@ a real blocker for another ticket. [S3, S4, S5, S6]
 ### R7. Daemon Lease At Dispatch
 
 When a poll decides to wake a daemon, the orchestrator's precondition of
-dispatch is the flip to the daemon dispatch state. A daemon in that dispatch
-state is not wake-eligible; if the evaluation crashes, normal active-ticket
-dispatch re-dispatches it and the idempotent evaluator re-derives the verdict.
-[S3, S4, S6, S12]
+dispatch is the flip to the first configured daemon dispatch state. A daemon in
+any configured dispatch state is not wake-eligible; if the evaluation crashes,
+normal active-ticket dispatch re-dispatches it and the idempotent evaluator
+re-derives the verdict. [S3, S4, S6, S12, S17]
 
 ### R8. Daemon Failure Handling
 
@@ -287,7 +313,10 @@ A blocked ticket is dispatch-eligible when every direct blocker is terminal or
 carries one configured maturity label. The default maturity label set is
 `["mature"]`. An empty maturity-label configuration reproduces upstream
 terminal-only behavior. Daemon-state blockers are the exception handled by R15.
-[S3, S5]
+`maturity_gate_state_scope` limits which candidate issue states receive the
+blocker-gate replacement; its default is `["todo"]`, preserving the current
+hardcoded `Todo` scope so the engine switch and later gate widening can be
+diagnosed separately. [S3, S5, S13, S17]
 
 ### R11. Depth-2-And-Deeper DAG Dispatch
 
@@ -299,9 +328,11 @@ chains. `max_stack_depth`, default `3`, is a plan-side constraint: the plan that
 emits the DAG is responsible for not drawing dependency chains deeper than the
 cap because the cap protects human review capacity. A chain beyond the cap is a
 plan bug, and the orchestrator must not compensate for it or police it in the
-engine. [S3, S5, S11]
+engine. The first rollout keeps `maturity_gate_state_scope` at `["todo"]`; any
+widening beyond that default is a separate human-approved configuration change.
+[S3, S5, S11, S13, S17]
 
-### R12. Maturity Signal External Dependency
+### R12. Maturity Signal And Team Configuration External Dependencies
 
 This project owns the Elixir maturity gate. The plan-side project owns branch
 mechanics and the workflow instruction that a blocker's coding agent sets the
@@ -311,6 +342,16 @@ mode: dependents wait for terminal blockers, which is correct but slower. The
 orchestrator must not read GitHub state for the maturity decision; GitHub events
 must be mirrored into Linear labels or comments by agents or bridges. [S5, S6,
 S11]
+
+The fork also consumes configured Linear state and label names. Creating those
+workflow states and labels on the target Linear team is external operator work
+owned by `DMAT-013`: `daemon_states`, `daemon_dispatch_states`, and
+`maturity_labels` are configured string sets; wake and maturity logic can be
+tested from pure snapshots; and `maturity_labels: []` reproduces upstream
+behavior. Real use and the deployment switchover require the team configuration
+to exist, but
+implementation and tests must not block on the ABC team already having those
+states or labels. [S12, S16, S17]
 
 ### R13. Phase-1 Maturity Scope
 
@@ -337,18 +378,22 @@ instead. [S4, S5, S6, S12]
 
 ### R16. Divergences And Documentation
 
-Create `DIVERGENCES.md` early, before the first implementation divergence needs
-to land. For this project, the divergence list must cover daemon states and
-timer-only wake semantics, the extra daemon dispatch state, the orchestrator
-dispatch flip and exhaustion park, maturity-gated dependency dispatch, the
-hardcoded `Todo` blocker-gate replacement, and per-state daemon dispatch
-budgeting. The divergence list should grow only when a requirement or
-implementation ticket establishes the behavior; do not pre-document
-team-scoped dispatch, hook environment metadata, one-orchestrator-per-team, or
-`branch_name` behavior from this requirements ticket alone. Cookbook material
-must cover the project sentinel pattern, repo neutrality, and multi-repo
-workspaces when those conventions are actually introduced. [S3, S4, S5, S11,
-S12]
+Create `DIVERGENCES.md` as the adoption interface for fork behavior. PR #3
+decision D-B supersedes the earlier "create it early" timing for this project
+and moves the content late, beside cookbook and real-use evidence, while the
+independent guardrail against editing `SPEC.md` protects fork divergence records
+until then.
+For this project, the divergence list must cover daemon states and timer-only
+wake semantics, the extra daemon dispatch state, the orchestrator dispatch flip
+and exhaustion park, maturity-gated dependency dispatch, the hardcoded `Todo`
+blocker-gate replacement plus `maturity_gate_state_scope`, per-state daemon
+dispatch budgeting, and team-scoped dispatch through `tracker.team_key`. The
+divergence list should grow only when a requirement or implementation ticket
+establishes the behavior; do not pre-document hook environment metadata,
+one-orchestrator-per-team, or `branch_name` behavior from this requirements
+ticket alone. Cookbook material must cover the project sentinel pattern, repo
+neutrality, and multi-repo workspaces when those conventions are actually
+introduced. [S3, S4, S5, S11, S12, S13, S16, S17]
 
 ### R17. Verification-First Implementation
 
@@ -362,17 +407,18 @@ drifted. [S1, S3, S4, S5, S6]
 Every implementation checkpoint must leave proof that maps directly to the
 accepted requirement it claims: command or environment, target ref, artifact
 location, result, known limitations, and next handoff. Local unit tests are not
-enough for the project-completion sentinel or tree-equality branch strategy;
-those need observable workflow or CI evidence. [S1, S7]
+enough for the project-completion sentinel; that needs observable workflow
+evidence. [S1, S7, S15]
 
 ### R19. Recurring-Work Concurrency Budget
 
 Recurring work must not be able to occupy the whole dispatch pool while
 implementation work is eligible. This is satisfied by configuration rather than
-new engine behavior: daemon evaluations run in a dedicated dispatch state, and
-`agent.max_concurrent_agents_by_state` caps that state. Ceilings only; no
-reserved floors for recurring work. Status reporting is per-state running
-counts, using the status surface that already reports running work. [S12]
+new engine behavior: daemon evaluations run in configured daemon dispatch
+states, and `agent.max_concurrent_agents_by_state` caps each such state.
+Ceilings only; no reserved floors for recurring work. Status reporting is
+per-state running counts, using the status surface that already reports running
+work. [S12, S17]
 
 ## Verification Backlog And Open Questions
 
@@ -411,10 +457,11 @@ counts, using the status surface that already reports running work. [S12]
   visibility. Owner: maturity gate verification follow-up under Jeremy Carroll.
   Follow-up: verify relation and label mechanics before implementing
   `maturity_labels` or regression prod behavior. [S3, S5, S11]
-- **Tree-equality CI between fork `main` and the derived rebased branch.** Verify
-  that the CI job fails loudly on drift. Owner: repo strategy and CI follow-up
-  under Jeremy Carroll. Follow-up: create the rebased branch contract and CI
-  check before relying on the adoption branch. [S3, S4]
+- **Team configuration for real use and switchover.** Create and verify the
+  configured team states and labels outside the fork implementation work. Owner:
+  `DMAT-013` under Jeremy Carroll. Follow-up: record the repo-neutral required
+  shape and ABC actuals before real use or deployment switchover relies on
+  them. [S12, S16, S17]
 
 ### Open Product Questions
 
@@ -450,13 +497,15 @@ The `daemon-maturity` project is done only when all of the following are true:
 - Phase-1 maturity-gate tests prove unknown or experimental stack labels do not
   make a dependent eligible before the maturity gate is satisfied. [S5, S11]
 - Per-state concurrency budget tests prove daemon evaluations are capped by the
-  configured daemon dispatch state and cannot occupy the whole dispatch pool
+  configured daemon dispatch states and cannot occupy the whole dispatch pool
   while implementation work is eligible. [S12]
-- `DIVERGENCES.md` exists before the first implementation divergence lands and
-  contains the divergence paragraphs required by completed implementation work.
-  [S3, S4, S5, S11]
-- The derived rebased branch has CI evidence showing tree equality with fork
-  `main`. [S3, S4]
+- Required Linear team configuration exists for real use and switchover, or
+  `DMAT-013` records the exact missing operator setup. Implementation tests do
+  not fail merely because the ABC team has not yet created the configured names.
+  [S16, S17]
+- `DIVERGENCES.md` exists before project final acceptance and contains the
+  divergence paragraphs required by completed implementation work. [S3, S4, S5,
+  S11, S13]
 
 ## Evidence Required For Follow-Up Work
 

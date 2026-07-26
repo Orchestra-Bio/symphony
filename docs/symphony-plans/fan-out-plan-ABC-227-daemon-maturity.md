@@ -57,6 +57,20 @@ Authoritative project sources:
   These are the rework source for initial ticket state, manual promotion order,
   late `DIVERGENCES.md` content, maturity-gate rollout scope, and real-use
   validation.
+- Linear issue `ABC-296` / `DMAT-014` from 2026-07-25, including the "Two
+  additions - do not split this ticket" comment, the Item 12 plural
+  `daemon_dispatch_states` decision, and PR #9 rework review. This is the
+  replan source that folds PR decisions, ticket cancellations, and manually
+  added tickets back into the canonical requirements, design, and plan.
+- Linear issue `ABC-283` / `DMAT-003` cancellation comment from 2026-07-25.
+  This cancels tree-equality CI as premature while retaining the fork `main`
+  true-merge constraint.
+- Linear issue `ABC-282` / `DMAT-002` verification work from 2026-07-25. This
+  confirms the third current blocker-helper path through
+  `revalidate_issue_for_dispatch/3`.
+- Linear issues `ABC-292` / `DMAT-012` and `ABC-295` / `DMAT-013` from
+  2026-07-25. These establish `tracker.team_key` as required switchover work
+  and Linear team configuration as operator-owned prerequisite work.
 
 Background sources read, superseded where they conflict with the merged
 requirements/design:
@@ -130,32 +144,59 @@ Unavailable sources: none.
 - The merged requirements/design in `docs/symphony-plans/` are authoritative;
   the 2026-07-19 handoffs and uploaded spec are background only where they
   conflict with `S11`, `S12`, or `D9`.
-- Fan-out creates eleven inert `Backlog` tickets. Nothing starts until a human
-  promotes a ticket out of `Backlog`; promotion order is a runbook, not an
-  automated frontier.
+- The original fan-out created inert `Backlog` tickets. Nothing starts until a
+  human promotes a ticket out of `Backlog`; promotion order is a runbook, not an
+  automated frontier. The current ticket set removes canceled `DMAT-003` and
+  adds human-decided `DMAT-012` and `DMAT-013`, so this plan now tracks twelve
+  non-replan `DMAT-*` items.
+- Replanning is scoped to DAG shape and ticket creation: it may add, remove, and
+  re-edge nodes, but it does not rewrite what an existing node means. Changing a
+  ticket's scope belongs to that ticket; requirements and design drift is
+  ordinary documentation work, not replanning. This ABC-296 / PR #9 human
+  decision keeps later daemon-owned replanning mechanical because DAGs can be
+  diffed and prose requirement sets cannot.
+- This project has no Mermaid DAG and no Linear blocker relations because the
+  frontier machinery is itself the deliverable. For `daemon-maturity`, the DAG
+  is the promotion runbook, so replanning it means editing the ordered list;
+  DAG-shaped replanning starts with the next project. A future replanning daemon
+  creates tickets and should reuse ABC-233's acceptance gate for live writes
+  instead of inventing another gate.
 - PR #3 review decision D-B supersedes the early-file timing in R16 for this
   plan: `DIVERGENCES.md` content lands late, beside cookbook and real-use
   evidence, after daemon and maturity behavior has settled. Until then, the
   global guardrail against editing `SPEC.md` protects fork divergence records.
   Cookbook material remains outside `DIVERGENCES.md`.
 - The tracker config surface for this phase is
-  `daemon_states`, `daemon_dispatch_state`, `daemon_default_wake`, and
+  `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`, and
   `maturity_labels`. Do not add `daemon_label` or class-budget config.
+- The first configured `daemon_dispatch_states` element is the daemon lease
+  write target. All configured elements are recognized for daemon identity,
+  crash recovery, and exclusion from implementation-class dispatch, making a
+  rename window expressible without another migration rule.
 - PR #3 review decision D-C adds one maturity-gate rollout field,
   `maturity_gate_state_scope`, defaulting to `["todo"]`. This is a switch-risk
   reducer, not class-budget config.
+- `DMAT-012` establishes team-scoped dispatch through `tracker.team_key` because
+  the live workflow is team-scoped. This is now project scope, not an
+  out-of-phase convention.
+- Linear team state and label creation is operator configuration owned by
+  `DMAT-013`. Implementation consumes configured names and can test against
+  strings and synthetic snapshots; real use and the deployment switchover need
+  the team configuration to exist.
 - Recurring-work budget is satisfied by the existing
   `agent.max_concurrent_agents_by_state` cap on the daemon dispatch state.
-  Ceilings only; no floors.
+  Ceilings only; no floors. Multiple daemon dispatch states would each carry
+  their own per-state cap.
 - A daemon wakes by timer only. Comments never cause daemon wake eligibility.
-  Urgency is a state write to `daemon_dispatch_state`.
+  Urgency is a state write to the first configured
+  `daemon_dispatch_states` element.
 - The wake anchor is the later `updatedAt` of the daemon's own titled workpad
   comment and the orchestrator's own titled workpad comment. `Comment.updatedAt`
   exists and advances on edit; do not reopen that platform verification.
 - The engine currently has `SymphonyElixir.Linear.Adapter.create_comment/2`, no
   `commentUpdate`, and no comment read path in the poll query.
 - Daemon lease-at-dispatch is the orchestrator flipping the ticket to
-  `daemon_dispatch_state`, not `Active`.
+  the first configured `daemon_dispatch_states` element, not `Active`.
 - Daemon retry exhaustion parks the daemon by editing the orchestrator's own
   titled comment with an unevaluated verdict; a later real daemon verdict
   supersedes the park.
@@ -183,12 +224,12 @@ Do not fan out implementation work for:
 - `stack:*` per-ticket overrides. This is deferred; the open question is
   whether the maturity point means AI review, human review, or another signal.
 - Class-based concurrency budgets. The recurring-work budget is satisfied by
-  `agent.max_concurrent_agents_by_state` on the daemon dispatch state.
+  `agent.max_concurrent_agents_by_state` on each daemon dispatch state.
 - Engine-side `max_stack_depth` enforcement. Default depth `3` is a plan-side
   constraint; the gate stays depth-agnostic.
-- Team-scoped dispatch, hook environment metadata, one-orchestrator-per-team,
-  and `branch_name` behavior. These are not established by the phase-1
-  requirements and should not be pre-documented.
+- Hook environment metadata, one-orchestrator-per-team, and `branch_name`
+  behavior. These are not established by the phase-1 requirements and should
+  not be pre-documented.
 - Check-back-later one-shot timed waits for non-daemon tickets. Phase 1 keeps
   extension points open without implementing the feature.
 - Writer-side comment upsert protocol and orphan cleanup. Those are external
@@ -207,19 +248,30 @@ this plan. For this integration-branch project, a dependency is satisfied when
 the upstream issue is project-integrated into
 `symphony/daemon-maturity/integration` with validation evidence recorded.
 
-Fan-out produces eleven `Backlog` tickets. Nothing starts until a human promotes
-it out of `Backlog`. This is intentional: the project is building the blocker,
-DAG, and frontier machinery that would otherwise automate this ordering, so the
-initial state must not pretend that machinery already exists.
+The original fan-out produced inert `Backlog` tickets. Nothing starts until a
+human promotes a ticket out of `Backlog`. This is intentional: the project is
+building the blocker, DAG, and frontier machinery that would otherwise automate
+this ordering, so the initial state must not pretend that machinery already
+exists. `DMAT-012` and `DMAT-013` are later human-decided additions with their
+own current Linear states; they are recorded below so this plan matches the
+ticket set.
 
 Suggested human promotion order:
 
-- Promote `DMAT-001`, `DMAT-002`, `DMAT-003`, and `DMAT-004` first to verify
-  the Linear, upstream, CI, and state mechanics that implementation depends on.
+- Promote `DMAT-001`, `DMAT-002`, and `DMAT-004` first to verify the Linear,
+  upstream, relation, label, and state-category mechanics that implementation
+  depends on. `DMAT-003` is canceled and no longer participates in promotion.
+- Project-integrate `DMAT-012` before any deployment switchover depends on the
+  fork, because the live workflow polls by team key.
 - Promote daemon implementation next: `DMAT-006`, `DMAT-007`, `DMAT-008`, and
   `DMAT-009`, preserving each item's dependency entries before promotion.
-- After daemon lifecycle behavior is project-integrated, promote the sentinel
-  portion of `DMAT-011` and let the real daemon run.
+- Complete `DMAT-013` before real use or switchover needs actual team states
+  and labels. The setup gaps found by `DMAT-004` feed `DMAT-013`; they are not
+  promotion blockers for implementation tickets that only consume configured
+  strings.
+- After daemon lifecycle behavior is project-integrated and required team
+  configuration exists, promote the sentinel portion of `DMAT-011` and let the
+  real daemon run.
 - Promote `DMAT-010` last for the blocker-gate replacement, with
   `maturity_gate_state_scope` left at its default `["todo"]`. Confirm the fork
   switch with blocker behavior unchanged, then widen the scope only through a
@@ -438,83 +490,6 @@ exclusions:
 - Do not implement daemon or maturity behavior.
 - Do not add retry-attempt config or parking behavior in this ticket.
 
-### DMAT-003 - Add Fork/Rebased Tree-Equality CI
-
-ticket_title: Add tree-equality CI for fork main and derived rebased branch
-
-initial_status: Backlog
-
-difficulty: hard
-
-ownership: Symphony workflow agent; human reviewer Jeremy Carroll; target
-repository `Orchestra-Bio/symphony`.
-
-scope: Add or verify CI that fails loudly when the merge-maintained fork `main`
-tree and the derived rebased branch tree diverge. Document the branch operating
-contract and any human-owned branch naming input that remains unresolved.
-
-source_files:
-
-- `docs/symphony-plans/daemon-maturity-requirements.md`
-- `docs/symphony-plans/daemon-maturity-design.md`
-- `.github/workflows/make-all.yml`
-- `.github/workflows/pr-description-lint.yml`
-- `.github/pull_request_template.md`
-- `README.md`
-
-owned_files:
-
-- `.github/workflows/tree-equality.yml`
-- `docs/symphony-plans/daemon-maturity-tree-equality-ci.md`
-
-source_notes:
-
-- Requirements R16, R17, and project done predicate.
-- Design `Documentation And Repository Strategy` and `Verification Boundaries`.
-- Daemon handoff repository strategy, superseded only where merged docs say so.
-
-dependencies: none
-
-integration_pattern: none
-
-initial_labels:
-
-- Linear: `pink`
-- GitHub PR: `pink`, `symphony`
-
-required_actions:
-
-- Confirm the exact derived rebased branch name or record a human-owned
-  unresolved branch-name question. Do not invent the name.
-- Add a read-only GitHub Actions workflow that compares fork `main` to the
-  confirmed derived rebased branch and fails when tree diff is non-empty.
-- Keep the workflow limited to comparison; do not add automatic rebasing,
-  force-push, or upstream PR creation.
-- Document how the branch is maintained and what a failing equality check means.
-
-acceptance_checks:
-
-- Workflow syntax is reviewable and references only confirmed branch names, or
-  the ticket stops with an explicit branch-name blocker before adding CI.
-- Local validation uses available static/workflow checks where possible. If
-  live GitHub Actions evidence requires a pushed branch, the PR and workpad name
-  that limitation.
-- The docs file states that fork `main` uses true upstream merges and the
-  derived rebased branch is a read-only artifact.
-
-split_criteria:
-
-- workflow-boundary
-- validation-surface
-- raw-note-verification
-
-exclusions:
-
-- Do not implement daemon or maturity behavior.
-- Do not force-push, create, or rewrite the derived branch unless a human
-  explicitly approves it.
-- Do not open an upstream PR.
-
 ### DMAT-004 - Verify Maturity, Label, And State Mechanics
 
 ticket_title: Verify maturity relation, label, and custom state mechanics
@@ -528,10 +503,12 @@ repository `Orchestra-Bio/symphony`.
 
 scope: Verify the Linear mechanics that maturity and daemon dispatch depend on:
 native blocker relation direction, labels on direct blockers, label-change
-visibility in refreshed snapshots, custom Linear state setup, and the daemon
-dispatch state's required `Started`-type behavior. Relation verification is
-scoped to direct blockers only; `max_stack_depth` is plan-side and must not
-widen this ticket into transitive-depth visibility.
+visibility in refreshed snapshots, state category visibility, and whether a
+daemon dispatch state can be represented as `Started`-type. Relation
+verification is scoped to direct blockers only; `max_stack_depth` is plan-side
+and must not widen this ticket into transitive-depth visibility. Actual ABC team
+state and label creation is operator work owned by `DMAT-013`, not a blocker on
+implementation tickets that only consume configured strings.
 
 source_files:
 
@@ -553,6 +530,8 @@ source_notes:
   `Gate Function`, `Plan-Side Obligations`, and `Verification Boundaries`.
 - PR #2 `D9`: daemon dispatch state is a deliberate eighth state and must be a
   `Started`-type state.
+- `DMAT-013`: team configuration is the single home for creating missing
+  states and labels found during this verification.
 
 owned_external_resources:
 
@@ -576,21 +555,23 @@ required_actions:
   tickets.
 - Verify whether label removals can be detected from current refreshed
   snapshots for one-time regression advisory comments.
-- Verify custom state category requirements for `Happy`, `Unhappy`, and the
-  daemon dispatch state, including that the dispatch state can be configured as
-  a `Started`-type state.
-- Record whether current team state setup exists, or list exact missing state
-  setup without inventing fallback names.
+- Verify state category/type visibility and that a daemon dispatch state can be
+  configured as a `Started`-type state.
+- Record current team setup gaps as inputs to `DMAT-013` without inventing
+  fallback names or treating missing operator setup as an implementation
+  promotion blocker.
 
 acceptance_checks:
 
-- The verification doc states whether each maturity and state setup requirement
-  is satisfied, drifted, or blocked.
+- The verification doc states whether each maturity relation/label and state
+  category mechanic is satisfied, drifted, or blocked, and records team setup
+  gaps for `DMAT-013`.
 - The doc explicitly states that only direct blocker visibility was verified
   and that transitive depth remains out of engine scope.
-- Any schema, label, state-category, or visibility gap that changes the design
-  is recorded as an `Input Needed` blocker before implementation tickets move
-  out of `Backlog`.
+- Any schema, relation, label-visibility, or state-category mechanic that
+  changes the design is recorded as an `Input Needed` blocker before
+  implementation tickets move out of `Backlog`; missing ABC team state or label
+  instances are recorded for `DMAT-013`.
 - Targeted validation includes Markdown formatting for the verification doc.
 
 split_criteria:
@@ -605,6 +586,168 @@ exclusions:
 - Do not add stack override parsing.
 - Do not migrate Linear team states.
 - Do not change the existing blocker gate.
+
+### DMAT-012 - Port Tracker Team Key
+
+ticket_title: Port tracker.team_key so the fork can run the live team-scoped
+workflow
+
+initial_status: In Review
+
+difficulty: medium
+
+ownership: Symphony implementation agent; human reviewer Jeremy Carroll; target
+repository `Orchestra-Bio/symphony`.
+
+scope: Add `tracker.team_key` support so the fork can validate and poll the live
+team-scoped workflow. This is required for switchover because the running
+workflow uses team-scoped dispatch rather than a project slug. Preserve
+`project_slug` precedence when both selectors are configured, and keep the
+no-selector case a loud config error.
+
+source_files:
+
+- `elixir/lib/symphony_elixir/config.ex`
+- `elixir/lib/symphony_elixir/config/schema.ex`
+- `elixir/lib/symphony_elixir/linear/client.ex`
+- `elixir/lib/symphony_elixir/status_dashboard.ex`
+- `elixir/README.md`
+- `elixir/WORKFLOW.md`
+- targeted tests under `elixir/test/symphony_elixir/`
+
+owned_files:
+
+- `elixir/lib/symphony_elixir/config.ex`
+- `elixir/lib/symphony_elixir/config/schema.ex`
+- `elixir/lib/symphony_elixir/linear/client.ex`
+- `elixir/lib/symphony_elixir/status_dashboard.ex`
+- `elixir/README.md`
+- `elixir/WORKFLOW.md`
+- targeted tests under `elixir/test/symphony_elixir/`
+
+source_notes:
+
+- PR #3 decision D-C: switchover risk includes losing team-scoped polling
+  because the live workflow uses `tracker.team_key`.
+- `ABC-292` / `DMAT-012` and PR #7 establish this as fork scope rather than an
+  out-of-phase convention.
+
+dependencies: none
+
+integration_pattern: none
+
+initial_labels:
+
+- Linear: `pink`
+- GitHub PR: `pink`, `symphony`
+
+required_actions:
+
+- Add `tracker.team_key` parsing, validation, and polling while preserving
+  `project_slug` behavior.
+- Keep `SPEC.md` untouched and record the fork divergence for later
+  `DIVERGENCES.md` folding.
+- Validate the live issue-workspace workflow with `tracker.team_key: ABC`.
+
+acceptance_checks:
+
+- Config validation accepts `team_key`, rejects a Linear tracker with no
+  selector, and preserves `project_slug` precedence.
+- Team-scoped polling returns team candidates; project-scoped polling still
+  works.
+- Targeted Elixir tests and `make -C elixir all` pass before handoff.
+
+split_criteria:
+
+- selector-seam
+- workflow-boundary
+- validation-surface
+
+exclusions:
+
+- Do not take unrelated CI-polling sort-key behavior from the source branch.
+- Do not edit `SPEC.md`.
+- Do not implement daemon or maturity behavior.
+
+### DMAT-013 - Document And Apply Team Configuration
+
+ticket_title: Document and apply expected ABC team configuration
+
+initial_status: In Progress
+
+difficulty: medium
+
+ownership: Symphony operator/documentation agent; human reviewer Jeremy
+Carroll; target repository `Orchestra-Bio/symphony`.
+
+scope: Create the expected ABC team workflow states and labels, document the
+repo-neutral required shape plus ABC actuals, and verify the resulting team
+configuration by query. This is the single home for team state and label setup:
+implementation tickets consume configured names and must not block on the team
+already having them. Real use and switchover depend on this ticket.
+
+source_files:
+
+- `docs/symphony-plans/daemon-maturity-requirements.md`
+- `docs/symphony-plans/daemon-maturity-design.md`
+- `docs/symphony-plans/daemon-maturity-linear-mechanics-verification.md`
+- Linear issue `ABC-295` / `DMAT-013`
+
+owned_files:
+
+- `docs/symphony-plans/daemon-maturity-team-configuration.md`
+
+source_notes:
+
+- `DMAT-004` verified state category mechanics and found missing ABC team setup.
+- `DMAT-013` owns creating and verifying `mature`, daemon cadence labels, daemon
+  resting states, and the daemon dispatch state name/category.
+- The fork schema consumes state and label names as strings;
+  `maturity_labels: []` reproduces upstream behavior for implementation tests.
+
+dependencies:
+
+- item: DMAT-004
+  type: integration
+  requires: Linear mechanics verification findings are available
+  reason: team setup should apply the verified state/category and label
+  requirements instead of guessing.
+
+integration_pattern: none
+
+initial_labels:
+
+- Linear: `pink`
+- GitHub PR: `pink`, `symphony`
+
+required_actions:
+
+- Document repo-neutral required state/label roles and ABC team actual names.
+- Create missing states and labels through recorded Linear GraphQL operations
+  when they are absent.
+- Verify every configured state and label by query, including state type/category.
+- Leave legacy states and labels untouched; do not migrate tickets.
+
+acceptance_checks:
+
+- `docs/symphony-plans/daemon-maturity-team-configuration.md` exists with the
+  required shape and ABC actuals.
+- Every ABC actual state and label exists on the team with the documented
+  category/type, verified by query.
+- The daemon dispatch state names are recorded.
+- Legacy states and labels are untouched.
+
+split_criteria:
+
+- external-system-boundary
+- operator-prerequisite
+- validation-surface
+
+exclusions:
+
+- Do not implement daemon or maturity behavior.
+- Do not delete legacy states or labels.
+- Do not migrate any ticket's state; migration belongs to switchover.
 
 ### DMAT-006 - Add Config And Normalized Model Runway
 
@@ -646,7 +789,7 @@ source_notes:
 - Design sections for config, state taxonomy, recurring-work budget, and
   blocker snapshot shape.
 - This item owns the four tracker config fields named in the requirements:
-  `daemon_states`, `daemon_dispatch_state`, `daemon_default_wake`, and
+  `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`, and
   `maturity_labels`.
 
 dependencies:
@@ -679,12 +822,14 @@ initial_labels:
 required_actions:
 
 - Add typed config fields for `tracker.daemon_states`,
-  `tracker.daemon_dispatch_state`, `tracker.daemon_default_wake`, and
+  `tracker.daemon_dispatch_states`, `tracker.daemon_default_wake`, and
   `tracker.maturity_labels` using existing schema patterns.
 - Add helper accessors through `SymphonyElixir.Config` instead of ad-hoc env
   reads.
-- Validate disjointness between daemon states, daemon dispatch state, active
-  states, and terminal states according to the design.
+- Validate disjointness between daemon states, daemon dispatch states, active
+  states, and terminal states according to the design. Validate every dispatch
+  state against configured active states, and require a non-empty
+  `daemon_dispatch_states` set when `daemon_states` is non-empty.
 - Preserve existing defaults when new config is absent; daemon/maturity
   behavior must be inert unless configured data makes it applicable.
 - Extend `SymphonyElixir.Linear.Issue` or supporting structs for normalized
@@ -696,8 +841,8 @@ acceptance_checks:
 
 - Tests prove workflows that omit daemon/maturity fields retain existing
   behavior.
-- Tests prove daemon states, daemon dispatch state, maturity labels, and default
-  wake values are normalized and validated.
+- Tests prove daemon states, daemon dispatch states, maturity labels, and
+  default wake values are normalized and validated.
 - Tests prove no `daemon_label` or class-budget config is accepted.
 - Targeted validation includes new tests and `make -C elixir specs.check`.
 
@@ -926,8 +1071,9 @@ ownership: Symphony implementation agent; human reviewer Jeremy Carroll; target
 repository `Orchestra-Bio/symphony`.
 
 scope: Own the central daemon lifecycle wiring in the orchestrator: sleep
-candidate evaluation, lease-at-dispatch flip to `daemon_dispatch_state`,
-daemon-dispatch-state crash recovery, per-state daemon dispatch cap
+candidate evaluation, lease-at-dispatch flip to the first configured
+`daemon_dispatch_states` element, daemon-dispatch-state crash recovery,
+per-state daemon dispatch cap
 visibility, finite retry exhaustion, and orchestrator-authored unevaluated
 workpad parks. This ticket does not implement maturity-gate dispatch.
 
@@ -968,8 +1114,11 @@ dependencies:
   replace it blindly.
 - item: DMAT-004
   type: integration
-  requires: custom state mechanics verification is project-integrated
-  reason: daemon lease depends on dispatch-state setup and category behavior.
+  requires: state category and relation/label mechanics verification is
+  project-integrated
+  reason: daemon lease depends on verified `Started`-type state mechanics; the
+  actual ABC team state setup is owned by `DMAT-013` and is not a dependency
+  for implementation tests.
 - item: DMAT-006
   type: integration
   requires: config/model runway is project-integrated
@@ -994,11 +1143,11 @@ required_actions:
 
 - Fetch daemon sleep candidates and evaluate them with the pure timer-only wake
   helper.
-- Before dispatching a due daemon, write the lease by moving it to
-  `daemon_dispatch_state`, then re-fetch and dispatch through active-state
-  machinery.
-- Ensure implementation-class dispatch excludes `daemon_dispatch_state` while
-  daemon dispatch still counts against that state's
+- Before dispatching a due daemon, write the lease by moving it to the first
+  configured `daemon_dispatch_states` element, then re-fetch and dispatch
+  through active-state machinery.
+- Ensure implementation-class dispatch excludes `daemon_dispatch_states` while
+  daemon dispatch still counts against each dispatch state's
   `max_concurrent_agents_by_state` cap.
 - Add finite daemon retry exhaustion and park exhausted daemon evaluations by
   editing the orchestrator's own titled workpad comment with
@@ -1045,14 +1194,15 @@ difficulty: hard
 ownership: Symphony implementation agent; human reviewer Jeremy Carroll; target
 repository `Orchestra-Bio/symphony`.
 
-scope: Implement the direct-edge maturity gate and wire it into both current
-blocker call sites. The gate replaces the hardcoded `Todo`-only terminal helper
-with shared `maturity_labels` logic, uses `{:gated, blockers}` naming, ignores
-daemon-state blockers with a warning, and emits one advisory comment per
-observed maturity regression without killing the dependent worker. It also owns
-the one-field rollout scope for the blocker gate: `maturity_gate_state_scope`,
-defaulting to `["todo"]`, so the fork engine can be switched with blocker
-behavior unchanged before a later human-approved widening.
+scope: Implement the direct-edge maturity gate and wire it into the shared
+terminal-only blocker helper used by candidate selection, retry re-selection,
+and dispatch-time revalidation. The gate replaces the hardcoded `Todo`-only
+terminal helper with shared `maturity_labels` logic, uses `{:gated, blockers}`
+naming, ignores daemon-state blockers with a warning, and emits one advisory
+comment per observed maturity regression without killing the dependent worker.
+It also owns the one-field rollout scope for the blocker gate:
+`maturity_gate_state_scope`, defaulting to `["todo"]`, so the fork engine can be
+switched with blocker behavior unchanged before a later human-approved widening.
 
 source_files:
 
@@ -1083,10 +1233,13 @@ source_notes:
 - Requirements R10, R11, R12, R13, R14, R15, R16, and R18.
 - Design `Blocker Snapshot Shape`, `Gate Function`, `Stack Labels`,
   `Regression Prod`, and `Plan-Side Obligations`.
-- PR #2 `M-1`, `M-3`, and `M-4`: two call sites, Todo-gate divergence, and
-  `{:gated, blockers}` result naming.
+- PR #2 `M-1`, `M-3`, and `M-4`: initial shared-helper call sites, Todo-gate
+  divergence, and `{:gated, blockers}` result naming.
 - PR #3 review decision D-C: keep first rollout scoped to `["todo"]` so the
   engine switch can be confirmed before widening maturity dispatch.
+- `ABC-282` verification: `retry_candidate_issue?/2` is also used by
+  `revalidate_issue_for_dispatch/3`, so replacing the shared helper covers the
+  dispatch-time revalidation path without adding a second check.
 
 dependencies:
 
@@ -1126,8 +1279,10 @@ required_actions:
   maturity label. Empty `maturity_labels` reproduces terminal-only behavior.
 - Ignore daemon-state blockers with a warning/diagnostic result because daemon
   blocker edges are plan bugs.
-- Replace the current terminal-only helper at both `should_dispatch_issue?/4`
-  and `retry_candidate_issue?/2`, sharing the same implementation.
+- Replace the current terminal-only helper at `should_dispatch_issue?/4` and
+  `retry_candidate_issue?/2`, sharing the same implementation; do not add a
+  second maturity check in `revalidate_issue_for_dispatch/3` because that path
+  already calls `retry_candidate_issue?/2`.
 - Use `{:gated, blockers}` or equivalent naming; leave
   `Orchestrator.State.blocked` untouched.
 - Add maturity regression advisory comments once per observed transition for
@@ -1143,8 +1298,8 @@ acceptance_checks:
   enables the intended candidate states.
 - Unit tests prove direct mature blockers open depth-2 dispatch and compose in
   depth-3 synthetic graphs without transitive depth checks.
-- Tests cover immature blockers, daemon-state blockers, both gate call sites,
-  `{:gated, blockers}` naming, and eligible -> regressed -> eligible
+- Tests cover immature blockers, daemon-state blockers, all current gate call
+  sites, `{:gated, blockers}` naming, and eligible -> regressed -> eligible
   transitions.
 - Regression advisory tests prove duplicate comments are not emitted every tick
   and the worker is not killed.
@@ -1181,8 +1336,9 @@ scope: Complete the public cookbook material and verify the flagship
 project-completion sentinel daemon and maturity-gated dependency behavior by
 real use. The validation path is merge, run it, and fix or revert what breaks;
 it is not a staged synthetic demo substituted for actual use. The run must use
-a real Linear project unless missing state setup, permissions, or credentials
-are recorded as an explicit blocker.
+a real Linear project after `DMAT-013` has created and verified the required
+team state/label configuration; missing project access, permissions, or
+credentials are recorded as explicit blockers.
 
 source_files:
 
@@ -1209,6 +1365,8 @@ source_notes:
 - PR #3 review decision D-C: real use replaces staged project-level evidence;
   fork `main` recovery is ordinary revert plus restart, while switch risk is
   reduced by first running the maturity gate with state scope `["todo"]`.
+- `DMAT-013` owns Linear team state and label setup before this ticket's real
+  use and switchover validation.
 
 owned_external_resources:
 
@@ -1227,6 +1385,12 @@ dependencies:
   the maturity portion of this ticket is claimed complete
   reason: the DAG and regression observations must exercise implemented
   maturity behavior.
+- item: DMAT-013
+  type: integration
+  requires: expected team states and labels are documented, created, and
+  verified before real-use execution
+  reason: real daemon and maturity use needs actual Linear state/label setup;
+  implementation tests do not.
 
 integration_pattern: none
 
@@ -1240,8 +1404,9 @@ required_actions:
 - Add cookbook guidance for the project sentinel pattern, daemon titled-workpad
   verdicts, repo neutrality, and multi-repo workspaces.
 - Identify or create a real Linear project suitable for a project-completion
-  sentinel. If required states, labels, or permissions are missing, record a
-  precise `Input Needed` handoff instead of substituting unit tests.
+  sentinel after `DMAT-013` is complete. If permissions, credentials, or project
+  access are missing, record a precise `Input Needed` handoff instead of
+  substituting unit tests.
 - After daemon lifecycle behavior is merged to fork `main`, run the sentinel in
   real use. If it breaks, record the failure, fix forward or revert by ordinary
   commit, restart, and rerun.
@@ -1358,16 +1523,16 @@ required_actions:
 - Create root `DIVERGENCES.md` after daemon lifecycle and maturity-gate behavior
   settles.
 - Include only implemented daemon/maturity divergence areas: daemon states and
-  timer-only wake semantics, titled workpad anchors, the daemon dispatch state
-  and per-state budget, the daemon lease flip and exhaustion park,
+  timer-only wake semantics, titled workpad anchors, daemon dispatch states and
+  per-state budget, the daemon lease flip and exhaustion park,
   maturity-gated dependency dispatch, the blocker-gate state-scope rollout, and
-  the hardcoded `Todo` blocker gate replacement.
+  the hardcoded `Todo` blocker gate replacement, plus team-scoped dispatch when
+  `DMAT-012` has landed as durable fork behavior.
 - State that `SPEC.md` was intentionally left untouched for fork divergences
   until this file existed.
-- Keep team-scoped dispatch, hook environment metadata,
-  one-orchestrator-per-team, `branch_name` behavior, `stack:*` override
-  semantics, and cookbook conventions out of `DIVERGENCES.md` unless they have
-  landed as durable fork behavior.
+- Keep hook environment metadata, one-orchestrator-per-team, `branch_name`
+  behavior, `stack:*` override semantics, and cookbook conventions out of
+  `DIVERGENCES.md` unless they have landed as durable fork behavior.
 
 acceptance_checks:
 
@@ -1392,13 +1557,18 @@ exclusions:
 
 ## Completion Gates
 
-- Fan-out creates all eleven generated tickets in `Backlog`. No generated
-  ticket starts until a human promotes it out of `Backlog`.
+- The original fan-out-created tickets remain inert until a human promotes them
+  out of `Backlog`; human-added `DMAT-012` and `DMAT-013` follow their current
+  Linear states.
 - The human promotion runbook has been followed or explicitly amended in the
   relevant ticket workpads before project final acceptance.
-- `DMAT-001`, `DMAT-002`, `DMAT-003`, and `DMAT-004` are
-  project-integrated or explicitly blocked with accepted human decisions before
-  dependent implementation tickets are promoted.
+- `DMAT-001`, `DMAT-002`, and `DMAT-004` are project-integrated or explicitly
+  blocked with accepted human decisions before dependent implementation tickets
+  are promoted. `DMAT-003` is canceled and no longer participates.
+- `DMAT-012` is project-integrated before deployment switchover relies on the
+  fork's team-scoped workflow.
+- `DMAT-013` creates/verifies required team state and label setup before real
+  use or deployment switchover relies on those names.
 - Daemon wake-contract tests pass with fake clock, deterministic jitter,
   timer-only wake semantics, titled workpad anchors, blocked-daemon coverage,
   and no `issue.updatedAt` fallback.
@@ -1407,22 +1577,20 @@ exclusions:
 - Lease and restart-recovery tests pass: dispatch-state lease, crash after
   lease re-dispatch, crash during evaluation retry, finite retry exhaustion
   park, and later real verdict superseding park.
-- Per-state concurrency tests prove daemon evaluations are capped by the daemon
+- Per-state concurrency tests prove daemon evaluations are capped by each daemon
   dispatch state through `agent.max_concurrent_agents_by_state`.
 - Maturity gate tests cover direct blocker labels, empty config terminal-only
   behavior, default `maturity_gate_state_scope: ["todo"]`, explicit scope
-  widening, depth 2, depth 3 composition, both gate call sites,
+  widening, depth 2, depth 3 composition, all current gate call sites,
   daemon-blocker warnings, and regression advisory comments.
-- Tree-equality CI between fork `main` and the confirmed derived rebased branch
-  is present and either passing or blocked only by an explicit human-owned
-  branch-name/setup question.
 - `DIVERGENCES.md` exists late, after behavior settles, and matches implemented
   behavior without adding fork divergences to `SPEC.md`.
 - Cookbook docs match implemented behavior and exclude out-of-phase items.
 - Real Linear project use records sleeping, timer wake, evaluation,
   Happy/Unhappy verdicts, advisory comments, project-completion predicate
   evidence, fixes or reverts, and restart evidence, or records the exact
-  missing access/state setup blocker.
+  missing project access, permission, credential, or unresolved `DMAT-013`
+  dependency blocker.
 - Real or human-accepted equivalent maturity DAG use records early dispatch on
   maturity and advisory-only regression behavior.
 - No project-scoped temporary markers, stubs, adapters, disabled paths,
@@ -1433,29 +1601,30 @@ exclusions:
 
 | Decision                                                               | Current plan behavior                                                                                                                                                      | Owner or follow-up        |
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| Exact derived rebased branch name for tree-equality CI                 | `DMAT-003` must confirm the branch name or stop with `Input Needed`; this plan does not invent one.                                                                        | Human lead or `DMAT-003`. |
-| Real Linear project/team for sentinel and maturity real-use evidence   | `DMAT-011` must use a human-approved real project with required states, labels, and permissions available; otherwise it records missing-access proof.                      | Human lead or `DMAT-011`. |
+| Real Linear project/team for sentinel and maturity real-use evidence   | `DMAT-011` must use a human-approved real project after `DMAT-013` creates and verifies required states and labels; otherwise it records missing-access proof.             | Human lead or `DMAT-011`. |
 | Phase-2 `stack:*` override semantics                                   | Not fanned out. Unknown or experimental stack labels must not widen phase-1 eligibility.                                                                                   | Later enhancement.        |
 | Check-back-later one-shot timed waits for non-daemon tickets           | Not fanned out. Phase 1 preserves extension points without implementing one-shot wait behavior.                                                                            | Later enhancement.        |
 | Writer-side comment convention and orphan cleanup                      | Not fanned out as fork engine work. The fork consumes titled comments and degrades safely; writer upsert protocol belongs to operator workflow/agent convention ownership. | Later workflow project.   |
 | SSH-spawned remote worker termination under `:one_for_all` supervision | Left as a technical verification called out by the design; implementation that relies on it must verify or stop.                                                           | Follow-up verification.   |
 
-No known open decision blocks committing this fan-out plan. The first open
-decision may block `DMAT-003`, and the second may block `DMAT-011` if required
-state setup or Linear permissions are unavailable.
+No known open decision blocks committing this fan-out plan. The real-use
+project decision may block `DMAT-011` if Linear project access, permissions, or
+credentials are unavailable after `DMAT-013` completes team configuration.
 
-## Dry-Run Ticket Payload Expectations
+## Current Ticket Set Expectations
 
-A no-write dry run from this plan should produce eleven new `Backlog` ticket
-payloads. Nothing starts until a human promotes a generated ticket out of
-`Backlog`.
+The current non-replan ticket set should contain twelve `DMAT-*` items:
+`DMAT-003` is canceled and removed from the active plan; `DMAT-012` and
+`DMAT-013` are human-decided additions with the states shown here. Original
+fan-out-created `Backlog` tickets remain inert until a human promotes them.
 
 | Item                                                                             | Initial status | Linear labels | GitHub PR labels   |
 | -------------------------------------------------------------------------------- | -------------- | ------------- | ------------------ |
 | DMAT-001 Verify daemon comment metadata, wake-label, and blocker fetch mechanics | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-002 Verify current SPEC.md and retry-exhaustion facts                       | Backlog        | `pink`        | `pink`, `symphony` |
-| DMAT-003 Add tree-equality CI for fork main and derived rebased branch           | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-004 Verify maturity relation, label, and custom state mechanics             | Backlog        | `pink`        | `pink`, `symphony` |
+| DMAT-012 Port tracker.team_key for the live team-scoped workflow                 | In Review      | `pink`        | `pink`, `symphony` |
+| DMAT-013 Document and apply expected ABC team configuration                      | In Progress    | `pink`        | `pink`, `symphony` |
 | DMAT-006 Add daemon and maturity config plus normalized data runway              | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-007 Implement timer-only daemon wake engine with fake-clock tests           | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-008 Add Linear comment read and commentUpdate support for daemon workpads   | Backlog        | `pink`        | `pink`, `symphony` |
@@ -1464,7 +1633,7 @@ payloads. Nothing starts until a human promotes a generated ticket out of
 | DMAT-011 Document cookbook conventions and verify daemon maturity by real use    | Backlog        | `pink`        | `pink`, `symphony` |
 | DMAT-005 Create DIVERGENCES.md after daemon maturity behavior settles            | Backlog        | `pink`        | `pink`, `symphony` |
 
-Each generated ticket payload must include:
+Each generated or human-added ticket payload must include:
 
 - Linear team: `ABC`
 - Project: `Daemon Tickets + Maturity-Gated Dependencies (symphony fork)`

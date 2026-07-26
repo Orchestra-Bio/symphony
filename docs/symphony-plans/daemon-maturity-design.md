@@ -24,8 +24,11 @@ Scope test: if a decision changes Elixir code or the config schema in this fork,
 it is designed here. If it does not, it is an external dependency; this document
 records the contract this project consumes, the owner that implements it, and
 how the orchestrator degrades when the contract is broken. Config schema is fork
-code and in scope. Deployment config values, agent-writing conventions, plan
-DAG shape, and operator `WORKFLOW.md` behavior are external dependencies.
+code and in scope. Deployment config values, Linear team state/label instances,
+agent-writing conventions, plan DAG shape, and operator `WORKFLOW.md` behavior
+are external dependencies. `DMAT-013` owns creating the configured Linear team
+states and labels; this fork owns consuming configured names and preserving safe
+degraded behavior when they are absent.
 
 ## Source Inputs
 
@@ -64,13 +67,24 @@ document as the dereferenceable public record of those sources.
   existing tests in `elixir/test/symphony_elixir/*`.
 - `D9`: GitHub PR #2 human review and handoff comments from 2026-07-25. These
   supersede earlier handoff text for daemon wake prods, daemon dispatch state,
-  comment anchoring, and recurring-work concurrency.
+  comment anchoring, one-shot wait breadth, and recurring-work concurrency.
+- `D10`: GitHub PR #3 human review, decision comments D-A/D-B/D-C, and approval
+  review from 2026-07-25. These supersede earlier handoff and requirements text
+  for fan-out promotion state, late `DIVERGENCES.md` timing, real-use evidence,
+  and the `maturity_gate_state_scope` switch-risk reducer.
+- `D11`: Linear issue `ABC-282` / `DMAT-002` verification work from
+  2026-07-25, including the confirmed `retry_candidate_issue?/2` call sites.
+- `D12`: Linear issues `ABC-292` / `DMAT-012`, `ABC-295` / `DMAT-013`, and
+  `ABC-296` / `DMAT-014` from 2026-07-25. These establish team-scoped dispatch,
+  team configuration, and plural `daemon_dispatch_states` as current project
+  requirements.
 
-Source precedence remains `D6 > D4 > D3` unless `D9` explicitly supersedes the
-handoff text for this project. The old tracker-metadata `next_wake_at` and
-`last_evaluated_at` scheme must not be implemented. Wake durability is labels
-plus titled workpad comments, not attachment JSON, tracker metadata, or in-memory
-timers. [D1, D4, D6, D9]
+Source precedence remains `D6 > D4 > D3` unless a later human decision source
+explicitly supersedes the handoff text for this project. The old
+tracker-metadata `next_wake_at` and `last_evaluated_at` scheme must not be
+implemented. Wake durability is labels plus titled workpad comments, not
+attachment JSON, tracker metadata, or in-memory timers. [D1, D4, D6, D9, D10,
+D12]
 
 ## Settled Design Decisions
 
@@ -78,32 +92,39 @@ timers. [D1, D4, D6, D9]
   `eligible = f(snapshot, now)`. Normal ticket dispatch remains snapshot-based
   except for the maturity gate. [D1:R1, D1:R2, D4, D6]
 - Comments never cause daemon wake eligibility. A sleeping daemon wakes only by
-  timer; urgent wake is a state write to the daemon dispatch state. Comments
-  left while sleeping are input for the next scheduled evaluation. [D1:R2, D9]
-- Resting daemon states are configured through `tracker.daemon_states`. A
-  separate `tracker.daemon_dispatch_state` is listed in `tracker.active_states`
-  and is daemon-only. This deliberately adds one active state beyond the
-  seven-state minimal model. [D1:R1, D1:R7, D6, D9]
+  timer; urgent wake is a state write to the first configured daemon dispatch
+  state. Comments left while sleeping are input for the next scheduled
+  evaluation. [D1:R2, D9, D12]
+- Resting daemon states are configured through `tracker.daemon_states`.
+  Separate `tracker.daemon_dispatch_states` entries are listed in
+  `tracker.active_states` and are daemon-only. This deliberately adds at least
+  one active state beyond the seven-state minimal model. [D1:R1, D1:R7, D6, D9,
+  D12]
 - Daemon-owned means `state in daemon_states` or
-  `state == daemon_dispatch_state`. There is no `daemon_label`; state carries
-  daemon identity across lease, recovery, and concurrency accounting. [D9]
+  `state in daemon_dispatch_states`. There is no `daemon_label`; state carries
+  daemon identity across lease, recovery, and concurrency accounting. [D9, D12]
 - A daemon sleep is durable only through tracker-visible data: a `wake:*`
   cadence label and the server-written `updatedAt` of titled workpad comments.
   The daemon's own workpad carries the real verdict; the orchestrator's own
   workpad carries exhaustion parks. [D1:R4, D1:R5, D4, D6, D9]
-- The daemon lease write is the orchestrator flipping the ticket to the daemon
-  dispatch state before dispatch. The wake clock is not advanced through
-  `next_wake_at`; it is re-derived from comment metadata and cadence on the next
-  resting poll. [D1:R7, D4, D6, D9]
+- The daemon lease write is the orchestrator flipping the ticket to the first
+  configured daemon dispatch state before dispatch. The wake clock is not
+  advanced through `next_wake_at`; it is re-derived from comment metadata and
+  cadence on the next resting poll. [D1:R7, D4, D6, D9, D12]
 - A daemon may wait on normal blocking tickets, but daemon tickets are never
   real blockers for other work. Daemon-state blockers in the maturity gate are
   ignored with a warning because they never become terminal or mature. [D1:R6,
   D1:R15, D4, D5, D6]
 - Maturity-gated dependency dispatch is a stateless, direct-edge gate over
   Linear native blocker relations. The gate must replace the current
-  terminal-only blocker helper in both candidate selection and retry
-  re-selection. The orchestrator must not read GitHub for the maturity decision.
-  [D1:R10, D1:R12, D5, D9]
+  terminal-only blocker helper in candidate selection, retry re-selection, and
+  dispatch-time revalidation because the current revalidation path routes
+  through `retry_candidate_issue?/2`. The orchestrator must not read GitHub for
+  the maturity decision. [D1:R10, D1:R12, D5, D9, D11]
+- `maturity_gate_state_scope`, defaulting to `["todo"]`, is the rollout scope
+  for the blocker-gate replacement. It preserves the current hardcoded `Todo`
+  state scope on switch so engine replacement and later gate widening are
+  separately diagnosable. [D1:R10, D1:R11, D10, D12]
 - Phase 1 does not implement per-ticket stack override semantics.
   `stack:eager|after-review|after-land` labels are reserved for a later
   enhancement and must not widen dispatch eligibility before the maturity gate
@@ -120,22 +141,23 @@ timers. [D1, D4, D6, D9]
 
 The current fork already has the main seams needed for this work:
 
-| Surface                                                 | Current fact                                                                      | Design consequence                                                                                                                     |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `SymphonyElixir.Config.Schema.Tracker`                  | Config has `active_states` and `terminal_states`.                                 | Add `daemon_states`, `daemon_dispatch_state`, `daemon_default_wake`, and `maturity_labels` through the same typed config path.         |
-| `SymphonyElixir.Config.Schema.Agent`                    | Config has `max_concurrent_agents` and `max_concurrent_agents_by_state`.          | Use existing per-state limits for R19; do not add `max_concurrent_agents_by_class` or floors.                                          |
-| `SymphonyElixir.Linear.Client.fetch_candidate_issues/0` | Fetches active-state issues, labels, and direct blockers from `inverseRelations`. | Extend blocker refs to include blocker labels; add a daemon sleep-candidate fetch path with comment metadata for wake evaluation.      |
-| `SymphonyElixir.Linear.Issue`                           | Normalized issue has labels and `blocked_by` with id, identifier, and state.      | Extend blocker refs with labels; add normalized comment refs without exposing raw Linear payloads broadly.                             |
-| `SymphonyElixir.Linear.Adapter.create_comment/2`        | Wraps a `commentCreate` mutation.                                                 | Orchestrator-authored exhaustion comments can use the existing create path when no orchestrator workpad exists.                        |
-| `SymphonyElixir.Linear.Adapter`                         | Has no `commentUpdate` mutation today.                                            | Edit-in-place workpads require a new mutation before daemon verdict and exhaustion comment binding can land.                           |
-| `SymphonyElixir.Orchestrator.maybe_dispatch/1`          | Tick order is reconcile, validate, fetch candidates, sort, dispatch.              | Insert daemon wake leasing after validation and before final dispatch selection. Keep reconciliation first.                            |
-| `should_dispatch_issue?/4`                              | Blocks `Todo` issues when any blocker is non-terminal.                            | Replace the hardcoded terminal-only helper with the shared maturity gate.                                                              |
-| `retry_candidate_issue?/2`                              | Reuses the same terminal-only blocker helper on abnormal-exit retry lookup.       | Use the same maturity gate as candidate selection so mature non-terminal blockers behave consistently after retry.                     |
-| `Orchestrator.State.blocked`                            | Tracks agent-reported blocked outcomes and has its own reconcile loop.            | Do not reuse `blocked` terminology for maturity-gate return values; the gate returns `{:gated, blockers}` and leaves this state alone. |
-| `dispatch_issue/4`                                      | Revalidates the issue by id immediately before dispatch.                          | Revalidate daemon dispatch state and maturity-blocker labels before dispatch.                                                          |
-| `handle_agent_down/5` and retry helpers                 | Failure retry delay is in-memory and capped only by delay.                        | Add a daemon-specific retry-exhaustion boundary before parking to Unhappy; do not use retry timers as sleep state.                     |
-| OTP supervision around orchestrator and workers         | Current code couples workers to orchestrator runtime under `:one_for_all`.        | Treat durable leases as wake-eligibility exclusion, not distributed worker locking; verify SSH-spawned remote workers respect this.    |
-| `Orchestrator.snapshot/2` and `StatusDashboard`         | Reports running/retry/blocking activity and current issue states.                 | Keep status reporting per-state; daemon budget visibility comes from daemon dispatch state occupancy.                                  |
+| Surface                                                 | Current fact                                                                                | Design consequence                                                                                                                     |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `SymphonyElixir.Config.Schema.Tracker`                  | Config has `active_states` and `terminal_states`.                                           | Add `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`, and `maturity_labels` through the same typed config path.        |
+| `SymphonyElixir.Config.Schema.Agent`                    | Config has `max_concurrent_agents` and `max_concurrent_agents_by_state`.                    | Use existing per-state limits for R19; do not add `max_concurrent_agents_by_class` or floors.                                          |
+| `SymphonyElixir.Linear.Client.fetch_candidate_issues/0` | Fetches active-state issues, labels, and direct blockers from `inverseRelations`.           | Extend blocker refs to include blocker labels; add a daemon sleep-candidate fetch path with comment metadata for wake evaluation.      |
+| `SymphonyElixir.Linear.Issue`                           | Normalized issue has labels and `blocked_by` with id, identifier, and state.                | Extend blocker refs with labels; add normalized comment refs without exposing raw Linear payloads broadly.                             |
+| `SymphonyElixir.Linear.Adapter.create_comment/2`        | Wraps a `commentCreate` mutation.                                                           | Orchestrator-authored exhaustion comments can use the existing create path when no orchestrator workpad exists.                        |
+| `SymphonyElixir.Linear.Adapter`                         | Has no `commentUpdate` mutation today.                                                      | Edit-in-place workpads require a new mutation before daemon verdict and exhaustion comment binding can land.                           |
+| `SymphonyElixir.Orchestrator.maybe_dispatch/1`          | Tick order is reconcile, validate, fetch candidates, sort, dispatch.                        | Insert daemon wake leasing after validation and before final dispatch selection. Keep reconciliation first.                            |
+| `should_dispatch_issue?/4`                              | Blocks `Todo` issues when any blocker is non-terminal.                                      | Replace the hardcoded terminal-only helper with the shared maturity gate.                                                              |
+| `retry_candidate_issue?/2`                              | Reuses the same terminal-only blocker helper on abnormal-exit retry lookup.                 | Use the same maturity gate as candidate selection so mature non-terminal blockers behave consistently after retry.                     |
+| `revalidate_issue_for_dispatch/3`                       | Refetches the issue immediately before every dispatch and calls `retry_candidate_issue?/2`. | The shared maturity gate is evaluated during dispatch-time revalidation too; do not add a second separate maturity check there.        |
+| `Orchestrator.State.blocked`                            | Tracks agent-reported blocked outcomes and has its own reconcile loop.                      | Do not reuse `blocked` terminology for maturity-gate return values; the gate returns `{:gated, blockers}` and leaves this state alone. |
+| `dispatch_issue/4`                                      | Revalidates the issue by id immediately before dispatch.                                    | Revalidate daemon dispatch state and maturity-blocker labels before dispatch.                                                          |
+| `handle_agent_down/5` and retry helpers                 | Failure retry delay is in-memory and capped only by delay.                                  | Add a daemon-specific retry-exhaustion boundary before parking to Unhappy; do not use retry timers as sleep state.                     |
+| OTP supervision around orchestrator and workers         | Current code couples workers to orchestrator runtime under `:one_for_all`.                  | Treat durable leases as wake-eligibility exclusion, not distributed worker locking; verify SSH-spawned remote workers respect this.    |
+| `Orchestrator.snapshot/2` and `StatusDashboard`         | Reports running/retry/blocking activity and current issue states.                           | Keep status reporting per-state; daemon budget visibility comes from daemon dispatch state occupancy.                                  |
 
 ## State Classes And Identity
 
@@ -154,10 +176,13 @@ tracker:
   daemon_states:
     - Happy
     - Unhappy
-  daemon_dispatch_state: Evaluating
+  daemon_dispatch_states:
+    - Evaluating
   daemon_default_wake: 1h
   maturity_labels:
     - mature
+  maturity_gate_state_scope:
+    - todo
 
 agent:
   max_concurrent_agents: 10
@@ -166,25 +191,41 @@ agent:
 ```
 
 Names are trimmed and compared lowercase, matching existing active and terminal
-state behavior. `daemon_dispatch_state` must normalize to one configured active
-state and must be disjoint from daemon and terminal states. `daemon_states` must
-be disjoint from active and terminal states after normalization.
-`maturity_labels: []` reproduces upstream terminal-only blocker behavior.
-[D1:R1, D1:R4, D1:R10, D9]
+state behavior. Every `daemon_dispatch_states` element must normalize to one
+configured active state, the set must be non-empty when `daemon_states` is
+non-empty, and it must be disjoint from daemon and terminal states.
+`daemon_states` must be disjoint from active and terminal states after
+normalization. The first configured `daemon_dispatch_states` element is the
+lease write target. All configured elements are recognized for daemon identity,
+crash recovery, and exclusion from implementation-class dispatch, which makes a
+state rename window expressible as `[NewName, OldName]`: write to `NewName` and
+still recognize tickets already sitting in `OldName`. `maturity_labels: []`
+reproduces upstream terminal-only blocker behavior. `maturity_gate_state_scope`,
+default `["todo"]`, is compared with the same trimmed lowercase state-name
+normalization as other tracker state lists. It limits where the blocker-gate
+replacement runs and intentionally keeps the initial switch at the current
+hardcoded `Todo` scope. Widening the scope is a deployment configuration
+change, not new code. [D1:R1, D1:R4, D1:R10, D1:R11, D9, D10, D12]
 
-The daemon dispatch state is a deliberate deviation from the seven-state minimal
-model. It is still a work-class state, not a pipeline state: it is daemon-only
-and must be a Linear `Started`-type state so the existing active-state machinery
-can dispatch and reconcile it. The exact deployed state names are operator
-configuration outside this repository; the schema fields are the fork contract.
-[D6, D9]
+Creating the named Linear states and labels is not fork code. The implementation
+must validate and consume names as strings, and tests must be able to exercise
+the pure wake and maturity logic from synthetic snapshots. The target Linear
+team must have the configured states and labels before real use or switchover;
+`DMAT-013` owns that operator work. [D1:R12, D12]
+
+The daemon dispatch-state set is a deliberate deviation from the seven-state
+minimal model. Each element is still a work-class state, not a pipeline state:
+it is daemon-only and must be a Linear `Started`-type state so the existing
+active-state machinery can dispatch and reconcile it. The exact deployed state
+names are operator configuration outside this repository; the schema fields are
+the fork contract. [D6, D9, D12]
 
 ### State Taxonomy
 
 | State class           | Role                               | Dispatch behavior                                            |
 | --------------------- | ---------------------------------- | ------------------------------------------------------------ |
 | Backlog or inactive   | ordinary waiting work              | not fetched unless listed in `active_states`                 |
-| implementation active | normal work                        | `active_states` minus `daemon_dispatch_state`                |
+| implementation active | normal work                        | `active_states` minus `daemon_dispatch_states`               |
 | daemon dispatch state | daemon evaluation lease target     | active, daemon-only, capped by per-state concurrency         |
 | daemon resting states | Happy/Unhappy daemon sleep states  | fetched by daemon sleep-candidate logic, not normal dispatch |
 | terminal states       | Done/Cancelled or configured equal | never dispatched                                             |
@@ -192,29 +233,30 @@ configuration outside this repository; the schema fields are the fork contract.
 Daemon-owned is purely state-derived:
 
 - `state in daemon_states`: sleeping daemon;
-- `state == daemon_dispatch_state`: leased or crash-recovered daemon;
+- `state in daemon_dispatch_states`: leased or crash-recovered daemon;
 - anything else: not daemon-owned.
 
-Implementation-class dispatch must use `active_states \ {daemon_dispatch_state}`,
-not `active_states` wholesale. Otherwise a daemon in the dispatch state could be
-treated as ordinary work. [D9]
+Implementation-class dispatch must use `active_states \ daemon_dispatch_states`,
+not `active_states` wholesale. Otherwise a daemon in a dispatch state could be
+treated as ordinary work. [D9, D12]
 
 Warn when state-derived class and daemon evidence disagree:
 
-- a ticket in the daemon dispatch state with no `wake:*` label and no titled
-  daemon workpad is dispatched as a daemon but logged as a likely operator error;
+- a ticket in a configured daemon dispatch state with no `wake:*` label and no
+  titled daemon workpad is dispatched as a daemon but logged as a likely
+  operator error;
 - a daemon-looking ticket in an ordinary active state is dispatched as normal
   work and will not re-arm its sleep. This is the dangerous asymmetric failure.
-  Operators forcing a daemon wake must flip it to the daemon dispatch state, not
-  to the ordinary implementation active state. [D9]
+  Operators forcing a daemon wake must flip it to the first configured daemon
+  dispatch state, not to the ordinary implementation active state. [D9, D12]
 
 ### Recurring-Work Budget
 
 No new class-budget config is added. R19 is met by putting daemon evaluations in
-their own active state and capping that state through the existing
+configured daemon dispatch states and capping each state through the existing
 `agent.max_concurrent_agents_by_state`. These are ceilings only; there are no
 reserved floors for recurring work. Status reporting remains per-state running
-counts. [D1:R19, D9]
+counts. [D1:R19, D9, D12]
 
 ## Daemon Wake Design
 
@@ -292,7 +334,7 @@ memory, does not mutate Linear, and does not inspect GitHub.
 Wake order:
 
 1. If the issue is not daemon-owned, return `:not_daemon`.
-2. If the issue is in `daemon_dispatch_state`, do not wake it; normal active
+2. If the issue is in `daemon_dispatch_states`, do not wake it; normal active
    dispatch owns it.
 3. If any direct normal blocker is not terminal, return `{:gated, blockers}`.
    Maturity labels do not unblock daemon sleeps; daemon sleeps wait for normal
@@ -337,32 +379,38 @@ timed waits for non-daemon tickets. Preserve these extension points:
   to ordinary active work and disarm without a daemon verdict;
 - never use `issue.updatedAt` as a fallback anchor.
 
-A later one-shot wait feature must also address breadth: `Inactive` contains far
-more tickets than daemon states, so comment reads must be label-gated or event
-bridged to stay proportional. Timed waits are a fallback for cases with no real
-event source, not a substitute for a bridge where an event exists. [D9]
+A later one-shot wait feature should keep the label-gated selection shape, but
+not because `Inactive` breadth makes the query expensive: PR #2 review retracted
+that breadth argument after verification showed a state-and-label poll remains a
+single bounded Linear query. The useful bound is per-ticket comment volume,
+which is controlled by writers rather than elapsed wait time. Timed waits are a
+fallback for cases with no real event source, not a substitute for a bridge
+where an event exists. [D9]
 
 ### Lease At Dispatch
 
 When a resting daemon returns `:due`, the orchestrator leases it with one tracker
 write:
 
-1. Update the issue state to `daemon_dispatch_state`.
+1. Update the issue state to the first configured
+   `daemon_dispatch_states` element.
 2. Re-fetch the issue by id.
 3. Dispatch it through the normal active dispatch path.
 
 If the state write fails, no claim is recorded and the daemon remains eligible
 for a later poll. If the state write succeeds and the orchestrator crashes
-before dispatch, restart recovery sees a ticket in the daemon dispatch state and
-dispatches it as daemon work. If the agent crashes while evaluating, normal
-active retry re-dispatches the daemon and the idempotent evaluator re-derives
-the verdict. [D1:R7, D4, D6, D9]
+before dispatch, restart recovery sees a ticket in a configured daemon dispatch
+state and dispatches it as daemon work. If the agent crashes while evaluating,
+normal active retry re-dispatches the daemon and the idempotent evaluator
+re-derives the verdict. [D1:R7, D4, D6, D9, D12]
 
-The lease write does not write `next_wake_at`, `last_evaluated_at`, attachment
+The lease write always writes the first configured dispatch state, but recovery
+recognizes every configured dispatch state. The lease write does not write
+`next_wake_at`, `last_evaluated_at`, attachment
 JSON, or any in-memory sleep timer. The next sleep is established only when the
 agent or exhaustion path edits a titled workpad comment and moves the ticket to
-Happy or Unhappy. The daemon dispatch state is a wake-eligibility exclusion, not
-a distributed worker lock. [D1:R4, D1:R7, D1:R8, D9]
+Happy or Unhappy. Daemon dispatch states are wake-eligibility exclusions, not
+distributed worker locks. [D1:R4, D1:R7, D1:R8, D9, D12]
 
 ### Agent Exit Contract
 
@@ -460,23 +508,36 @@ for ignored daemon-state blockers. The gate is evaluated from the current
 snapshot every tick and during dispatch revalidation. It adds no GitHub reads
 and no tracker writes. [D1:R10, D1:R12, D1:R15]
 
-The same gate implementation must be used by both known call sites:
+The gate applies only when the candidate issue's normalized state is in
+`maturity_gate_state_scope`. Outside that scope, the replacement preserves the
+current non-`Todo` behavior by not applying blocker gating. The default
+`["todo"]` makes the state scope of the replacement match the existing helper;
+operators can widen the scope only after the engine switch is confirmed. [D1:R10,
+D1:R11, D10, D12]
+
+The same gate implementation must be used by all current call sites:
 
 - `should_dispatch_issue?/4`, used during poll candidate selection;
-- `retry_candidate_issue?/2`, used by abnormal-exit retry lookup paths.
+- `retry_candidate_issue?/2`, used by abnormal-exit retry lookup paths;
+- `revalidate_issue_for_dispatch/3`, which runs on every dispatch and calls
+  `retry_candidate_issue?/2` after refetching the issue.
 
 Without this sharing, a dependent stacked on a mature non-terminal blocker could
 dispatch from the poll path and then become stranded after abnormal exit because
-retry re-selection fell back to terminal-only blockers. [D9]
+retry re-selection fell back to terminal-only blockers. Because dispatch-time
+revalidation already routes through the shared helper, replacing the helper
+covers that final pre-launch check too; adding a second maturity check there
+would duplicate the same decision and create drift risk. [D9, D11]
 
-The gate applies to candidate issues with blockers, not to a hardcoded `Todo`
-state name. Under the fork's current active-state shape, this newly gates any
-candidate active state; a ticket already running is untouched because dispatch
-selection skips running and claimed ids. When its session ends, it is simply not
-re-selected until the blocker clears. Under the minimal state model, the same
-change collapses to the expected single-active-state gate. This divergence lands
-with the maturity gate and before the state-model migration. [D1:R10, D1:R11,
-D6, D9]
+The gate applies to candidate issues with blockers and to the configured state
+scope, not to hardcoded code paths. Under the fork's current active-state shape,
+the default `["todo"]` preserves the existing helper's state scope. A ticket
+already running is untouched because dispatch selection skips running and
+claimed ids. When its session ends, it is simply not re-selected while the gate
+applies and the blocker remains unsatisfied. Under the minimal state model, the
+same change collapses to the expected single-active-state gate, and a later
+scope widening can be diagnosed separately from the engine switch. [D1:R10,
+D1:R11, D6, D9, D10]
 
 `Orchestrator.State.blocked` remains the agent-reported blocked-outcome map and
 is untouched by this project. Maturity gating must use `{:gated, blockers}` or
@@ -555,15 +616,18 @@ ignored. [D1:R11, D1:R12, D1:R13, D1:R15, D9]
 
 Project planning artifacts live under `docs/symphony-plans/` so Orchestra-owned
 requirements and design documents are distinct from upstream-owned `docs/`
-content. `DIVERGENCES.md` must exist before the first implementation divergence
-lands. For this project, implementation work should add paragraphs only as
-behavior lands. Required paragraphs include:
+content. PR #3 decision D-B moves `DIVERGENCES.md` content late for this
+project, beside cookbook and real-use evidence, while the independent
+`SPEC.md` guardrail protects fork divergence records. Required paragraphs
+include implemented behavior for:
 
 - daemon states, timer-only wake semantics, and titled workpad anchors;
 - the daemon-only dispatch state and per-state daemon budget;
 - the daemon lease state flip and exhaustion park;
 - maturity-gated dependency dispatch;
-- the hardcoded `Todo` blocker-gate replacement.
+- the hardcoded `Todo` blocker-gate replacement and
+  `maturity_gate_state_scope` rollout;
+- team-scoped dispatch through `tracker.team_key` once `DMAT-012` lands.
 
 Cookbook material must not be placed in `DIVERGENCES.md`. Cookbook entries
 should cover:
@@ -578,23 +642,23 @@ The one-orchestrator-per-team deployment invariant should be documented when
 daemon behavior lands, because two orchestrators on one team would be an
 operational defect. It should not be pre-documented by this design-only ticket.
 
-The fork's `main` branch remains merge-maintained. The derived rebased branch is
-a read-only artifact and must be tree-equal to `main` with CI evidence before
-the project relies on it. [D1:R16, D1:R17, D9]
+The fork's `main` branch remains merge-maintained through true upstream merges.
+The derived rebased branch and tree-equality CI are deferred until a real
+upstream adoption conversation exists; they are not project dependencies for
+daemon or maturity implementation. [D1:R16, D1:R17, D10, D12]
 
 ## Verification Boundaries
 
 These items are open verification work, not settled implementation behavior:
 
-| Verification                                                                                                                                                 | Owner/follow-up                                   | Blocks                                                               |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- | -------------------------------------------------------------------- |
-| Current `SPEC.md` facts: state defaults, tick sequence, retry formula, restart semantics, hook contract, issue `branch_name`, and upstream TODOs.            | Verification ticket under Jeremy Carroll.         | Any implementation that relies on upstream compatibility claims.     |
-| Linear daemon wake fetch mechanics: comment metadata shape, narrow body fetch for new comment ids, `commentUpdate`, `wake:*` label visibility, and blockers. | Daemon wake verification follow-up.               | Daemon wake eligibility and Linear binding implementation.           |
-| Linear maturity mechanics: relation direction, nested blocker labels, label-change visibility in refreshed snapshots.                                        | Maturity gate verification follow-up.             | `maturity_labels`, daemon-blocker warnings, and regression prods.    |
-| Tree-equality CI between fork `main` and the derived rebased branch.                                                                                         | Repo strategy and CI follow-up.                   | Any adoption-branch claims.                                          |
-| Linear custom state setup for the minimal state model plus daemon dispatch state.                                                                            | State model migration follow-up.                  | Workflow migration to `Active`, daemon dispatch, `Happy`, `Unhappy`. |
-| Existing retry exhaustion behavior.                                                                                                                          | Daemon failure-handling implementation follow-up. | Parking failed daemon evaluations back to Unhappy.                   |
-| SSH-spawned remote worker termination under `:one_for_all`.                                                                                                  | Runtime verification follow-up.                   | Reliance on single-orchestrator/single-writer recovery semantics.    |
+| Verification                                                                                                                                                 | Owner/follow-up                                   | Blocks                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Current `SPEC.md` facts: state defaults, tick sequence, retry formula, restart semantics, hook contract, issue `branch_name`, and upstream TODOs.            | Verification ticket under Jeremy Carroll.         | Any implementation that relies on upstream compatibility claims.                                         |
+| Linear daemon wake fetch mechanics: comment metadata shape, narrow body fetch for new comment ids, `commentUpdate`, `wake:*` label visibility, and blockers. | Daemon wake verification follow-up.               | Daemon wake eligibility and Linear binding implementation.                                               |
+| Linear maturity mechanics: relation direction, nested blocker labels, label-change visibility in refreshed snapshots.                                        | Maturity gate verification follow-up.             | `maturity_labels`, daemon-blocker warnings, and regression prods.                                        |
+| Linear team state and label configuration for the minimal state model, daemon dispatch states, daemon resting states, maturity labels, and wake labels.      | `DMAT-013` operator configuration follow-up.      | Real use and deployment switchover; implementation tests use configured strings and synthetic snapshots. |
+| Existing retry exhaustion behavior.                                                                                                                          | Daemon failure-handling implementation follow-up. | Parking failed daemon evaluations back to Unhappy.                                                       |
+| SSH-spawned remote worker termination under `:one_for_all`.                                                                                                  | Runtime verification follow-up.                   | Reliance on single-orchestrator/single-writer recovery semantics.                                        |
 
 `Comment.updatedAt` existence and edit behavior is already verified by existing
 project workpads; do not re-open it as an open verification. If any required
@@ -611,7 +675,7 @@ prebuilt fan-out payload:
   those facts.
 - Add config and pure state-class helpers before daemon wake or maturity gates
   need them.
-- Add daemon dispatch state validation and per-state budget examples before
+- Add daemon dispatch-state validation and per-state budget examples before
   daemon evaluations can occupy dispatch slots for long periods.
 - Add comment metadata reads, narrow body fetches, and `commentUpdate` support
   before daemon Linear binding or exhaustion parking.
@@ -621,9 +685,10 @@ prebuilt fan-out payload:
   project sentinel demo.
 - Implement daemon Linear binding before daemon failure parking, because the
   parking path writes the same titled-workpad format.
-- Implement blocker-label fetch and the shared maturity gate for both call sites
-  before regression prod behavior.
-- Create `DIVERGENCES.md` before the first behavior divergence PR lands.
+- Implement blocker-label fetch and the shared maturity gate for all current
+  call sites before regression prod behavior.
+- Keep `SPEC.md` untouched for fork divergences; write `DIVERGENCES.md` late,
+  beside cookbook and real-use evidence, after behavior has settled.
 - Add cookbook material when the corresponding convention exists; do not
   pre-document conventions that have not landed.
 
@@ -631,12 +696,13 @@ prebuilt fan-out payload:
 
 Required implementation validation:
 
-- Config tests for `daemon_states`, `daemon_dispatch_state`,
-  `daemon_default_wake`, and `maturity_labels`; no `daemon_label` or class
-  budget config exists.
+- Config tests for `daemon_states`, `daemon_dispatch_states`,
+  `daemon_default_wake`, `maturity_labels`, and
+  `maturity_gate_state_scope`; no `daemon_label` or class budget config exists.
 - Per-state budget tests proving daemon evaluations are capped by
-  `max_concurrent_agents_by_state` for the daemon dispatch state and cannot
-  occupy the whole dispatch pool while implementation work is eligible.
+  `max_concurrent_agents_by_state` for each configured daemon dispatch state
+  and cannot occupy the whole dispatch pool while implementation work is
+  eligible.
 - Pure fake-clock daemon wake tests for timer due, timer sleep, no comment
   fallback, conflicting wake labels, deterministic jitter, blocked daemons,
   duplicate titled comments, and startup overdue staggering.
@@ -646,7 +712,8 @@ Required implementation validation:
   writer identification, `commentUpdate`, blocker label normalization, and
   direct relation direction.
 - Lease and restart recovery tests:
-  - state flip succeeds and dispatches daemon work from `daemon_dispatch_state`;
+  - state flip succeeds to the first configured `daemon_dispatch_states` element
+    and dispatches daemon work;
   - crash after state flip but before dispatch re-dispatches the daemon;
   - crash during evaluation reuses normal active retry;
   - retry exhaustion parks to Unhappy and writes an unevaluated orchestrator
@@ -654,7 +721,8 @@ Required implementation validation:
   - a later real verdict supersedes an exhaustion park.
 - Maturity gate tests with synthetic depth-2 and depth-3 graphs:
   terminal blockers, mature blockers, immature blockers, daemon-state blockers,
-  empty `maturity_labels`, both gate call sites, and eligible -> regressed ->
+  empty `maturity_labels`, default `maturity_gate_state_scope: ["todo"]`,
+  explicit scope widening, all gate call sites, and eligible -> regressed ->
   eligible transitions.
 - Stack-label parser tests proving phase-1 labels do not widen eligibility.
 - Regression prod tests proving the dependent worker is not killed, duplicate
@@ -670,27 +738,27 @@ those demos. [D1:R18]
 
 ## Requirement Coverage
 
-| Requirement                     | Design coverage                                                              |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| R1 daemon state class           | `tracker.daemon_states`, daemon dispatch state, and state-derived identity.  |
-| R2 daemon wake eligibility      | Pure timer wake function; comments never wake, urgent wake is a state write. |
-| R3 restart tolerance and jitter | Deterministic durable jitter plus startup staggering.                        |
-| R4 Linear wake binding          | `wake:*` parsing and titled workpad `updatedAt` anchor.                      |
-| R5 evaluation contract          | Workpad edit-in-place contract and idempotent evaluation requirement.        |
-| R6 blocked daemons              | Terminal-only normal blocker gate for daemon sleeps.                         |
-| R7 lease at dispatch            | State flip to `daemon_dispatch_state` and crash recovery.                    |
-| R8 failure handling             | Finite daemon retry exhaustion and unevaluated orchestrator workpad park.    |
-| R9 project sentinel demo        | Cookbook and validation boundary for real Linear sentinel evidence.          |
-| R10 maturity gate               | Direct-edge `maturity_labels` gate over blocker state and labels.            |
-| R11 depth-2-and-deeper dispatch | Edge-local, depth-agnostic gate plus plan-side depth cap and tests.          |
-| R12 external maturity signal    | No GitHub reads; labels/comments must mirror maturity into Linear.           |
-| R13 phase-1 maturity scope      | Stack labels reserved and parsed safely without widening eligibility.        |
-| R14 regression behavior         | One advisory comment per observed maturity regression; worker continues.     |
-| R15 daemon blockers             | Daemon-state blockers ignored with warnings in maturity gate.                |
-| R16 divergences and docs        | `docs/symphony-plans/`, `DIVERGENCES.md`, and cookbook boundaries.           |
-| R17 verification-first          | Verification boundary table and sequencing constraints.                      |
-| R18 reviewable evidence         | Validation strategy names command/evidence expectations.                     |
-| R19 recurring-work budget       | Dedicated daemon dispatch state capped by existing per-state concurrency.    |
+| Requirement                     | Design coverage                                                                                            |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| R1 daemon state class           | `tracker.daemon_states`, `tracker.daemon_dispatch_states`, and state-derived identity.                     |
+| R2 daemon wake eligibility      | Pure timer wake function; comments never wake, urgent wake is a state write.                               |
+| R3 restart tolerance and jitter | Deterministic durable jitter plus startup staggering.                                                      |
+| R4 Linear wake binding          | `wake:*` parsing and titled workpad `updatedAt` anchor.                                                    |
+| R5 evaluation contract          | Workpad edit-in-place contract and idempotent evaluation requirement.                                      |
+| R6 blocked daemons              | Terminal-only normal blocker gate for daemon sleeps.                                                       |
+| R7 lease at dispatch            | State flip to the first `daemon_dispatch_states` element and crash recovery across the configured set.     |
+| R8 failure handling             | Finite daemon retry exhaustion and unevaluated orchestrator workpad park.                                  |
+| R9 project sentinel demo        | Cookbook and validation boundary for real Linear sentinel evidence.                                        |
+| R10 maturity gate               | Direct-edge `maturity_labels` gate over blocker state and labels, scoped by `maturity_gate_state_scope`.   |
+| R11 depth-2-and-deeper dispatch | Edge-local, depth-agnostic gate plus plan-side depth cap, scoped rollout, and tests.                       |
+| R12 external dependencies       | No GitHub reads; labels/comments must mirror maturity into Linear; `DMAT-013` owns team state/label setup. |
+| R13 phase-1 maturity scope      | Stack labels reserved and parsed safely without widening eligibility.                                      |
+| R14 regression behavior         | One advisory comment per observed maturity regression; worker continues.                                   |
+| R15 daemon blockers             | Daemon-state blockers ignored with warnings in maturity gate.                                              |
+| R16 divergences and docs        | `docs/symphony-plans/`, late `DIVERGENCES.md`, team-scoped dispatch, and cookbook boundaries.              |
+| R17 verification-first          | Verification boundary table and sequencing constraints.                                                    |
+| R18 reviewable evidence         | Validation strategy names command/evidence expectations.                                                   |
+| R19 recurring-work budget       | Configured daemon dispatch states capped by existing per-state concurrency.                                |
 
 ## ABC-232 Done Predicate
 
