@@ -59,6 +59,28 @@ defmodule SymphonyElixir.Linear.Issue do
   @spec workpad_title() :: String.t()
   def workpad_title, do: @workpad_title
 
+  @spec anchor_comments(t()) :: [comment_ref()]
+  def anchor_comments(%__MODULE__{comments: comments}) when is_list(comments) do
+    Enum.filter(comments, &match?(%DateTime{}, Map.get(&1, :updated_at)))
+  end
+
+  def anchor_comments(%__MODULE__{}), do: []
+
+  @spec latest_anchor_comment(t()) :: {:ok, comment_ref()} | {:error, :missing_workpad_anchor}
+  def latest_anchor_comment(%__MODULE__{} = issue) do
+    issue
+    |> anchor_comments()
+    |> Enum.max_by(
+      &Map.fetch!(&1, :updated_at),
+      fn left, right -> DateTime.compare(left, right) != :lt end,
+      fn -> nil end
+    )
+    |> case do
+      nil -> {:error, :missing_workpad_anchor}
+      comment -> {:ok, comment}
+    end
+  end
+
   @spec label_names(t()) :: [String.t()]
   def label_names(%__MODULE__{labels: labels}) do
     labels

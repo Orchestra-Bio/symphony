@@ -58,6 +58,23 @@ defmodule SymphonyElixir.LinearIssueTest do
     assert Issue.normalize_comment_ref(%{id: "comment-6", updated_at: 123}).updated_at == nil
   end
 
+  test "anchor_comments returns only filtered comments with server updatedAt metadata" do
+    anchor = %{id: "comment-1", updated_at: ~U[2026-07-25 17:35:21.968Z]}
+
+    issue = %Issue{
+      comments: [
+        %{id: "comment-2", updated_at: nil},
+        anchor,
+        %{id: "comment-3"}
+      ]
+    }
+
+    assert Issue.anchor_comments(issue) == [anchor]
+    assert Issue.latest_anchor_comment(issue) == {:ok, anchor}
+    assert Issue.anchor_comments(%Issue{comments: nil}) == []
+    assert Issue.latest_anchor_comment(%Issue{comments: nil}) == {:error, :missing_workpad_anchor}
+  end
+
   test "normalize_labels accepts Linear node maps and bare label lists" do
     assert Issue.normalize_labels(%{"nodes" => [%{"name" => " Pink "}, %{"name" => "PINK"}]}) == ["pink"]
     assert Issue.normalize_labels(%{nodes: [%{name: " Mature "}, " Ready ", nil]}) == ["mature", "ready"]

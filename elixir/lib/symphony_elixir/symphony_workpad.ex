@@ -56,21 +56,9 @@ defmodule SymphonyElixir.SymphonyWorkpad do
   end
 
   @spec latest_anchor_comment(Issue.t()) :: {:ok, Issue.comment_ref()} | {:error, :missing_workpad_anchor}
-  def latest_anchor_comment(%Issue{comments: comments}) when is_list(comments) do
-    comments
-    |> Enum.filter(&match?(%DateTime{}, Map.get(&1, :updated_at)))
-    |> Enum.max_by(
-      &Map.fetch!(&1, :updated_at),
-      fn left, right -> DateTime.compare(left, right) != :lt end,
-      fn -> nil end
-    )
-    |> case do
-      nil -> {:error, :missing_workpad_anchor}
-      comment -> {:ok, comment}
-    end
+  def latest_anchor_comment(%Issue{} = issue) do
+    Issue.latest_anchor_comment(issue)
   end
-
-  def latest_anchor_comment(%Issue{}), do: {:error, :missing_workpad_anchor}
 
   defp anchor_comment_id(%Issue{} = issue) do
     case latest_anchor_comment(issue) do

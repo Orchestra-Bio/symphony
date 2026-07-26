@@ -3,7 +3,7 @@ defmodule SymphonyElixir.DaemonWake do
   Pure daemon timer wake evaluator.
   """
 
-  alias SymphonyElixir.{Linear.Issue, SymphonyWorkpad}
+  alias SymphonyElixir.Linear.Issue
 
   @jitter_offsets_seconds [-60, -30, 0, 30, 60]
   @supported_wakes %{
@@ -183,10 +183,12 @@ defmodule SymphonyElixir.DaemonWake do
   defp supported_wake_label?("wake:" <> cadence), do: Map.has_key?(@supported_wakes, cadence)
 
   defp resolve_anchor(issue) do
-    duplicate_warning =
-      if filtered_anchor_comment_count(issue) > 1, do: [:duplicate_workpad_anchors], else: []
+    anchor_comments = Issue.anchor_comments(issue)
 
-    case SymphonyWorkpad.latest_anchor_comment(issue) do
+    duplicate_warning =
+      if length(anchor_comments) > 1, do: [:duplicate_workpad_anchors], else: []
+
+    case Issue.latest_anchor_comment(issue) do
       {:ok, %{updated_at: %DateTime{} = updated_at} = comment} ->
         {:ok, Map.get(comment, :id), updated_at, duplicate_warning}
 
@@ -200,12 +202,6 @@ defmodule SymphonyElixir.DaemonWake do
         end
     end
   end
-
-  defp filtered_anchor_comment_count(%Issue{comments: comments}) when is_list(comments) do
-    Enum.count(comments, &match?(%DateTime{}, Map.get(&1, :updated_at)))
-  end
-
-  defp filtered_anchor_comment_count(%Issue{}), do: 0
 
   defp normalized_states(values) do
     values
