@@ -3,6 +3,8 @@ defmodule SymphonyElixir.Linear.Issue do
   Normalized Linear issue representation used by the orchestrator.
   """
 
+  @workpad_title "## Symphony Workpad"
+
   defstruct [
     :id,
     :identifier,
@@ -53,6 +55,9 @@ defmodule SymphonyElixir.Linear.Issue do
           created_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
+
+  @spec workpad_title() :: String.t()
+  def workpad_title, do: @workpad_title
 
   @spec label_names(t()) :: [String.t()]
   def label_names(%__MODULE__{labels: labels}) do

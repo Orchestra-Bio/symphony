@@ -8,6 +8,9 @@ defmodule SymphonyElixir.Tracker do
   @callback fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
   @callback fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
+  @doc """
+  Fetches a comment body by id for audit-trail reads outside daemon wake polling.
+  """
   @callback fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   @callback update_comment(String.t(), String.t()) :: :ok | {:error, term()}

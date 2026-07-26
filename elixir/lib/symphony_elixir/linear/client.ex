@@ -9,13 +9,9 @@ defmodule SymphonyElixir.Linear.Client do
 
   @issue_page_size 50
   @comment_page_size 1
-  @comment_anchor_title "## Symphony Workpad"
   @max_error_body_log_bytes 1_000
 
-  # Select the engine-owned workpad anchor without reading large comment bodies.
-  # Linear returns the newest `updatedAt` first, so duplicate anchors remain deterministic.
-  @issue_page_fields """
-      nodes {
+  @issue_node_fields """
         id
         identifier
         title
@@ -51,6 +47,8 @@ defmodule SymphonyElixir.Linear.Client do
             }
           }
         }
+        # Select the engine-owned workpad anchor without reading large comment bodies.
+        # updatedAt plus first: 1 makes duplicate anchors deterministic.
         comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}}) {
           nodes {
             id
@@ -59,6 +57,11 @@ defmodule SymphonyElixir.Linear.Client do
         }
         createdAt
         updatedAt
+  """
+
+  @issue_page_fields """
+      nodes {
+  #{@issue_node_fields}
       }
       pageInfo {
         hasNextPage
@@ -85,51 +88,7 @@ defmodule SymphonyElixir.Linear.Client do
   @query_by_ids """
   query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
-      nodes {
-        id
-        identifier
-        title
-        description
-        priority
-        state {
-          name
-        }
-        branchName
-        url
-        assignee {
-          id
-        }
-        labels {
-          nodes {
-            name
-          }
-        }
-        inverseRelations(first: $relationFirst) {
-          nodes {
-            type
-            issue {
-              id
-              identifier
-              state {
-                name
-              }
-              labels {
-                nodes {
-                  name
-                }
-              }
-            }
-          }
-        }
-        comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}}) {
-          nodes {
-            id
-            updatedAt
-          }
-        }
-        createdAt
-        updatedAt
-      }
+  #{@issue_page_fields}
     }
   }
   """
@@ -200,6 +159,12 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
+  @doc """
+  Fetches a comment body by id for out-of-band workpad audit reads.
+
+  Daemon wake polling filters the titled workpad anchor server-side and stays on
+  metadata only; this narrow body lookup is deliberately off the wake path.
+  """
   @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
   def fetch_comment_body(comment_id) when is_binary(comment_id) do
     if Config.present_string?(Config.settings!().tracker.api_key) do
@@ -315,7 +280,7 @@ defmodule SymphonyElixir.Linear.Client do
                first: @issue_page_size,
                relationFirst: @issue_page_size,
                commentFirst: @comment_page_size,
-               commentAnchorTitle: @comment_anchor_title,
+               commentAnchorTitle: Issue.workpad_title(),
                after: after_cursor
              }
              |> Map.merge(selector_variables)
@@ -383,7 +348,7 @@ defmodule SymphonyElixir.Linear.Client do
            first: length(batch_ids),
            relationFirst: @issue_page_size,
            commentFirst: @comment_page_size,
-           commentAnchorTitle: @comment_anchor_title
+           commentAnchorTitle: Issue.workpad_title()
          }) do
       {:ok, body} ->
         with {:ok, issues} <- decode_linear_response(body, assignee_filter) do

@@ -71,9 +71,10 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
              "comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}})"
 
     assert query =~ "updatedAt"
+    # `body` appears in the filter expression; this only rejects a selected body field.
     refute query =~ ~r/\n\s+body\s*\n/
     assert variables["commentFirst"] == 1
-    assert variables["commentAnchorTitle"] == "## Symphony Workpad"
+    assert variables["commentAnchorTitle"] == SymphonyElixir.Linear.Issue.workpad_title()
     assert variables["relationFirst"] == 50
   end
 
@@ -118,13 +119,21 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
     assert issue.comments == [%{id: "comment-1", updated_at: ~U[2026-07-25 17:35:21.968Z]}]
     assert issue.blocked_by == [%{id: "blocker-1", identifier: "ABC-100", state: "Done", labels: ["mature"]}]
 
-    assert_receive {:fetch_issue_states_request, query, %{ids: ["issue-1"], commentFirst: 1, commentAnchorTitle: "## Symphony Workpad"}}
+    assert_receive {:fetch_issue_states_request, query,
+                    %{
+                      ids: ["issue-1"],
+                      commentFirst: 1,
+                      commentAnchorTitle: comment_anchor_title
+                    }}
+
+    assert comment_anchor_title == SymphonyElixir.Linear.Issue.workpad_title()
 
     assert query =~ "SymphonyLinearIssuesById"
 
     assert query =~
              "comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}})"
 
+    # `body` appears in the filter expression; this only rejects a selected body field.
     refute query =~ ~r/\n\s+body\s*\n/
   end
 
