@@ -46,6 +46,9 @@ defmodule SymphonyElixir.Config.Schema do
 
     @primary_key false
 
+    @supported_daemon_default_wakes ~w(15m 1h 4h 1d)
+    @unsupported_tracker_fields ~w(daemon_label)
+
     embedded_schema do
       field(:kind, :string)
       field(:endpoint, :string, default: "https://api.linear.app/graphql")
@@ -56,6 +59,11 @@ defmodule SymphonyElixir.Config.Schema do
       field(:required_labels, {:array, :string}, default: [])
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
       field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+      field(:daemon_states, {:array, :string}, default: [])
+      field(:daemon_dispatch_states, {:array, :string}, default: [])
+      field(:daemon_default_wake, :string, default: "1h")
+      field(:maturity_labels, {:array, :string}, default: ["mature"])
+      field(:maturity_gate_state_scope, {:array, :string}, default: ["todo"])
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -72,10 +80,16 @@ defmodule SymphonyElixir.Config.Schema do
           :assignee,
           :required_labels,
           :active_states,
-          :terminal_states
+          :terminal_states,
+          :daemon_states,
+          :daemon_dispatch_states,
+          :daemon_default_wake,
+          :maturity_labels,
+          :maturity_gate_state_scope
         ],
         empty_values: []
       )
+      |> Schema.reject_config_fields(attrs, @unsupported_tracker_fields)
       |> update_change(:project_slug, &Schema.normalize_optional_string/1)
       |> update_change(:team_key, &Schema.normalize_optional_string/1)
       |> update_change(:required_labels, fn labels ->
@@ -83,7 +97,105 @@ defmodule SymphonyElixir.Config.Schema do
         |> Enum.map(&(String.trim(&1) |> String.downcase()))
         |> Enum.uniq()
       end)
+      |> update_change(:daemon_states, &Schema.normalize_string_set/1)
+      |> update_change(:daemon_dispatch_states, &Schema.normalize_string_set/1)
+      |> update_change(:daemon_default_wake, &Schema.normalize_issue_state/1)
+      |> update_change(:maturity_labels, &Schema.normalize_string_set/1)
+      |> update_change(:maturity_gate_state_scope, &Schema.normalize_string_set/1)
+      |> validate_inclusion(:daemon_default_wake, @supported_daemon_default_wakes)
+      |> Schema.validate_string_set(:daemon_states)
+      |> Schema.validate_string_set(:daemon_dispatch_states)
+      |> Schema.validate_string_set(:maturity_labels)
+      |> Schema.validate_string_set(:maturity_gate_state_scope)
+      |> validate_daemon_state_contract()
     end
+
+    defp validate_daemon_state_contract(changeset) do
+      active_states = normalized_set(get_field(changeset, :active_states))
+      terminal_states = normalized_set(get_field(changeset, :terminal_states))
+      daemon_states = normalized_set(get_field(changeset, :daemon_states))
+      daemon_dispatch_states = normalized_set(get_field(changeset, :daemon_dispatch_states))
+
+      changeset
+      |> maybe_add_error(
+        :daemon_dispatch_states,
+        MapSet.size(daemon_states) > 0 and MapSet.size(daemon_dispatch_states) == 0,
+        "must be configured when daemon_states is non-empty"
+      )
+      |> maybe_add_error(
+        :daemon_dispatch_states,
+        not MapSet.subset?(daemon_dispatch_states, active_states),
+        "must be listed in tracker.active_states"
+      )
+      |> maybe_add_error(
+        :daemon_states,
+        not MapSet.disjoint?(daemon_states, active_states),
+        "must be disjoint from tracker.active_states"
+      )
+      |> maybe_add_error(
+        :daemon_states,
+        not MapSet.disjoint?(daemon_states, terminal_states),
+        "must be disjoint from tracker.terminal_states"
+      )
+      |> maybe_add_error(
+        :daemon_dispatch_states,
+        not MapSet.disjoint?(daemon_dispatch_states, daemon_states),
+        "must be disjoint from tracker.daemon_states"
+      )
+      |> maybe_add_error(
+        :daemon_dispatch_states,
+        not MapSet.disjoint?(daemon_dispatch_states, terminal_states),
+        "must be disjoint from tracker.terminal_states"
+      )
+    end
+
+    defp normalized_set(values) when is_list(values) do
+      values
+      |> Enum.map(&Schema.normalize_issue_state/1)
+      |> Enum.reject(&(&1 == ""))
+      |> MapSet.new()
+    end
+
+    defp normalized_set(_values), do: MapSet.new()
+
+    defp maybe_add_error(changeset, field, true, message), do: add_error(changeset, field, message)
+    defp maybe_add_error(changeset, _field, false, _message), do: changeset
+  end
+
+  @doc false
+  @spec reject_config_fields(Ecto.Changeset.t(), map(), [String.t()]) :: Ecto.Changeset.t()
+  def reject_config_fields(changeset, attrs, fields) when is_map(attrs) do
+    Enum.reduce(fields, changeset, fn field, changeset_acc ->
+      if Map.has_key?(attrs, field) do
+        add_error(changeset_acc, String.to_atom(field), "is not supported")
+      else
+        changeset_acc
+      end
+    end)
+  end
+
+  def reject_config_fields(changeset, _attrs, _fields), do: changeset
+
+  @doc false
+  @spec normalize_string_set(term()) :: [String.t()]
+  def normalize_string_set(values) when is_list(values) do
+    values
+    |> Enum.map(&normalize_issue_state/1)
+    |> Enum.uniq()
+  end
+
+  def normalize_string_set(_values), do: []
+
+  @doc false
+  @spec validate_string_set(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
+  def validate_string_set(changeset, field) do
+    validate_change(changeset, field, fn ^field, values ->
+      if is_list(values) and Enum.any?(values, &(&1 == "")) do
+        [{field, "entries must not be blank"}]
+      else
+        []
+      end
+    end)
   end
 
   defmodule Polling do
@@ -148,6 +260,8 @@ defmodule SymphonyElixir.Config.Schema do
     alias SymphonyElixir.Config.Schema
 
     @primary_key false
+    @unsupported_agent_fields ~w(max_concurrent_agents_by_class daemon_max_concurrent_agents_by_class)
+
     embedded_schema do
       field(:max_concurrent_agents, :integer, default: 10)
       field(:max_turns, :integer, default: 20)
@@ -163,6 +277,7 @@ defmodule SymphonyElixir.Config.Schema do
         [:max_concurrent_agents, :max_turns, :max_retry_backoff_ms, :max_concurrent_agents_by_state],
         empty_values: []
       )
+      |> Schema.reject_config_fields(attrs, @unsupported_agent_fields)
       |> validate_number(:max_concurrent_agents, greater_than: 0)
       |> validate_number(:max_turns, greater_than: 0)
       |> validate_number(:max_retry_backoff_ms, greater_than: 0)
@@ -345,10 +460,14 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  @spec normalize_issue_state(String.t()) :: String.t()
+  @spec normalize_issue_state(term()) :: String.t()
   def normalize_issue_state(state_name) when is_binary(state_name) do
-    String.downcase(state_name)
+    state_name
+    |> String.trim()
+    |> String.downcase()
   end
+
+  def normalize_issue_state(state_name), do: state_name |> to_string() |> normalize_issue_state()
 
   @doc false
   @spec normalize_optional_string(term()) :: String.t() | nil

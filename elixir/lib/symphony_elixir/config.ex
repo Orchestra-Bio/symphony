@@ -55,6 +55,41 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
+  @spec daemon_state_set() :: MapSet.t()
+  def daemon_state_set do
+    settings!().tracker.daemon_states
+    |> MapSet.new()
+  end
+
+  @spec daemon_dispatch_state_set() :: MapSet.t()
+  def daemon_dispatch_state_set do
+    settings!().tracker.daemon_dispatch_states
+    |> MapSet.new()
+  end
+
+  @spec daemon_dispatch_target_state() :: String.t() | nil
+  def daemon_dispatch_target_state do
+    settings!().tracker.daemon_dispatch_states
+    |> List.first()
+  end
+
+  @spec daemon_default_wake() :: String.t()
+  def daemon_default_wake do
+    settings!().tracker.daemon_default_wake
+  end
+
+  @spec maturity_label_set() :: MapSet.t()
+  def maturity_label_set do
+    settings!().tracker.maturity_labels
+    |> MapSet.new()
+  end
+
+  @spec maturity_gate_state_scope_set() :: MapSet.t()
+  def maturity_gate_state_scope_set do
+    settings!().tracker.maturity_gate_state_scope
+    |> MapSet.new()
+  end
+
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
   def codex_turn_sandbox_policy(workspace \\ nil) do
     case Schema.resolve_runtime_turn_sandbox_policy(settings!(), workspace) do
