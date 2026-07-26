@@ -8,10 +8,10 @@ defmodule SymphonyElixir.Linear.Client do
   alias SymphonyElixir.Config.Schema.Tracker, as: TrackerConfig
 
   @issue_page_size 50
+  @comment_page_size 1
   @max_error_body_log_bytes 1_000
 
-  @issue_page_fields """
-      nodes {
+  @issue_node_fields """
         id
         identifier
         title
@@ -39,11 +39,29 @@ defmodule SymphonyElixir.Linear.Client do
               state {
                 name
               }
+              labels {
+                nodes {
+                  name
+                }
+              }
             }
+          }
+        }
+        # Select the engine-owned workpad anchor without reading large comment bodies.
+        # updatedAt plus first: 1 makes duplicate anchors deterministic.
+        comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}}) {
+          nodes {
+            id
+            updatedAt
           }
         }
         createdAt
         updatedAt
+  """
+
+  @issue_page_fields """
+      nodes {
+  #{@issue_node_fields}
       }
       pageInfo {
         hasNextPage
@@ -52,7 +70,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_project """
-  query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+  query SymphonyLinearPollByProject($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!, $after: String) {
     issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
   #{@issue_page_fields}
     }
@@ -60,7 +78,7 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_team """
-  query SymphonyLinearPollByTeam($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $after: String) {
+  query SymphonyLinearPollByTeam($teamKey: String!, $stateNames: [String!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!, $after: String) {
     issues(filter: {team: {key: {eq: $teamKey}}, state: {name: {in: $stateNames}}}, first: $first, after: $after) {
   #{@issue_page_fields}
     }
@@ -68,42 +86,9 @@ defmodule SymphonyElixir.Linear.Client do
   """
 
   @query_by_ids """
-  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!) {
+  query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!, $commentFirst: Int!, $commentAnchorTitle: String!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
-      nodes {
-        id
-        identifier
-        title
-        description
-        priority
-        state {
-          name
-        }
-        branchName
-        url
-        assignee {
-          id
-        }
-        labels {
-          nodes {
-            name
-          }
-        }
-        inverseRelations(first: $relationFirst) {
-          nodes {
-            type
-            issue {
-              id
-              identifier
-              state {
-                name
-              }
-            }
-          }
-        }
-        createdAt
-        updatedAt
-      }
+  #{@issue_page_fields}
     }
   }
   """
@@ -112,6 +97,15 @@ defmodule SymphonyElixir.Linear.Client do
   query SymphonyLinearViewer {
     viewer {
       id
+    }
+  }
+  """
+
+  @comment_body_query """
+  query SymphonyLinearCommentBody($commentId: String!) {
+    comment(id: $commentId) {
+      id
+      body
     }
   }
   """
@@ -163,6 +157,29 @@ defmodule SymphonyElixir.Linear.Client do
           do_fetch_issue_states(ids, assignee_filter)
         end
     end
+  end
+
+  @doc """
+  Fetches a comment body by id for out-of-band workpad audit reads.
+
+  Daemon wake polling filters the titled workpad anchor server-side and stays on
+  metadata only; this narrow body lookup is deliberately off the wake path.
+  """
+  @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def fetch_comment_body(comment_id) when is_binary(comment_id) do
+    if Config.present_string?(Config.settings!().tracker.api_key) do
+      do_fetch_comment_body(comment_id, &graphql/2)
+    else
+      {:error, :missing_linear_api_token}
+    end
+  end
+
+  @doc false
+  @spec fetch_comment_body_for_test(String.t(), (String.t(), map() -> {:ok, map()} | {:error, term()})) ::
+          {:ok, String.t()} | {:error, term()}
+  def fetch_comment_body_for_test(comment_id, graphql_fun)
+      when is_binary(comment_id) and is_function(graphql_fun, 2) do
+    do_fetch_comment_body(comment_id, graphql_fun)
   end
 
   @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -255,6 +272,8 @@ defmodule SymphonyElixir.Linear.Client do
                stateNames: state_names,
                first: @issue_page_size,
                relationFirst: @issue_page_size,
+               commentFirst: @comment_page_size,
+               commentAnchorTitle: Issue.workpad_title(),
                after: after_cursor
              }
              |> Map.merge(selector_variables)
@@ -297,6 +316,25 @@ defmodule SymphonyElixir.Linear.Client do
   defp poll_query({:project_slug, project_slug}), do: {@query_by_project, %{projectSlug: project_slug}}
   defp poll_query({:team_key, team_key}), do: {@query_by_team, %{teamKey: team_key}}
 
+  defp do_fetch_comment_body(comment_id, graphql_fun) when is_function(graphql_fun, 2) do
+    case graphql_fun.(@comment_body_query, %{commentId: comment_id}) do
+      {:ok, %{"data" => %{"comment" => %{"body" => body}}}} when is_binary(body) ->
+        {:ok, body}
+
+      {:ok, %{"data" => %{"comment" => nil}}} ->
+        {:error, :comment_not_found}
+
+      {:ok, %{"errors" => errors}} ->
+        {:error, {:linear_graphql_errors, errors}}
+
+      {:ok, _body} ->
+        {:error, :linear_unknown_payload}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp do_fetch_issue_states(ids, assignee_filter) do
     do_fetch_issue_states(ids, assignee_filter, &graphql/2)
   end
@@ -320,7 +358,9 @@ defmodule SymphonyElixir.Linear.Client do
     case graphql_fun.(@query_by_ids, %{
            ids: batch_ids,
            first: length(batch_ids),
-           relationFirst: @issue_page_size
+           relationFirst: @issue_page_size,
+           commentFirst: @comment_page_size,
+           commentAnchorTitle: Issue.workpad_title()
          }) do
       {:ok, body} ->
         with {:ok, issues} <- decode_linear_response(body, assignee_filter) do
@@ -485,6 +525,7 @@ defmodule SymphonyElixir.Linear.Client do
       url: issue["url"],
       assignee_id: assignee_field(assignee, "id"),
       blocked_by: extract_blockers(issue),
+      comments: extract_comments(issue),
       labels: extract_labels(issue),
       assigned_to_worker: assigned_to_worker?(assignee, assignee_filter),
       created_at: parse_datetime(issue["createdAt"]),
@@ -580,13 +621,7 @@ defmodule SymphonyElixir.Linear.Client do
       %{"type" => relation_type, "issue" => blocker_issue}
       when is_binary(relation_type) and is_map(blocker_issue) ->
         if String.downcase(String.trim(relation_type)) == "blocks" do
-          [
-            %{
-              id: blocker_issue["id"],
-              identifier: blocker_issue["identifier"],
-              state: get_in(blocker_issue, ["state", "name"])
-            }
-          ]
+          [Issue.normalize_blocker_ref(blocker_issue)]
         else
           []
         end
@@ -597,6 +632,12 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp extract_blockers(_), do: []
+
+  defp extract_comments(%{"comments" => %{"nodes" => comments}}) when is_list(comments) do
+    Enum.map(comments, &Issue.normalize_comment_ref/1)
+  end
+
+  defp extract_comments(_), do: []
 
   defp parse_datetime(nil), do: nil
 

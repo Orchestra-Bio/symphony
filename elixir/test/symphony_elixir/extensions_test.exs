@@ -25,6 +25,11 @@ defmodule SymphonyElixir.ExtensionsTest do
       {:ok, issue_ids}
     end
 
+    def fetch_comment_body(comment_id) do
+      send(self(), {:fetch_comment_body_called, comment_id})
+      {:ok, "body for #{comment_id}"}
+    end
+
     def graphql(query, variables) do
       send(self(), {:graphql_called, query, variables})
 
@@ -221,6 +226,7 @@ defmodule SymphonyElixir.ExtensionsTest do
   test "tracker delegates to memory and linear adapters" do
     issue = %Issue{id: "issue-1", identifier: "MT-1", state: "In Progress"}
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue, %{id: "ignored"}])
+    Application.put_env(:symphony_elixir, :memory_tracker_comment_bodies, %{"comment-1" => "## Codex Workpad"})
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
@@ -229,14 +235,19 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_candidate_issues()
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issues_by_states([" in progress ", 42])
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
+    assert {:ok, "## Codex Workpad"} = SymphonyElixir.Tracker.fetch_comment_body("comment-1")
     assert :ok = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
+    assert :ok = SymphonyElixir.Tracker.update_comment("comment-1", "updated")
     assert :ok = SymphonyElixir.Tracker.update_issue_state("issue-1", "Done")
     assert_receive {:memory_tracker_comment, "issue-1", "comment"}
+    assert_receive {:memory_tracker_comment_update, "comment-1", "updated"}
     assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
 
     Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
     assert :ok = Memory.create_comment("issue-1", "quiet")
+    assert :ok = Memory.update_comment("comment-1", "quiet update")
     assert :ok = Memory.update_issue_state("issue-1", "Quiet")
+    assert {:error, :comment_not_found} = Memory.fetch_comment_body("missing-comment")
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
     assert SymphonyElixir.Tracker.adapter() == Adapter
@@ -253,6 +264,9 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert {:ok, ["issue-1"]} = Adapter.fetch_issue_states_by_ids(["issue-1"])
     assert_receive {:fetch_issue_states_by_ids_called, ["issue-1"]}
+
+    assert {:ok, "body for comment-1"} = Adapter.fetch_comment_body("comment-1")
+    assert_receive {:fetch_comment_body_called, "comment-1"}
 
     Process.put(
       {FakeLinearClient, :graphql_result},
