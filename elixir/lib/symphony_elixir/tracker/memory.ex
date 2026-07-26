@@ -35,9 +35,23 @@ defmodule SymphonyElixir.Tracker.Memory do
      end)}
   end
 
+  @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def fetch_comment_body(comment_id) when is_binary(comment_id) do
+    case Map.fetch(configured_comment_bodies(), comment_id) do
+      {:ok, body} when is_binary(body) -> {:ok, body}
+      _ -> {:error, :comment_not_found}
+    end
+  end
+
   @spec create_comment(String.t(), String.t()) :: :ok | {:error, term()}
   def create_comment(issue_id, body) do
     send_event({:memory_tracker_comment, issue_id, body})
+    :ok
+  end
+
+  @spec update_comment(String.t(), String.t()) :: :ok | {:error, term()}
+  def update_comment(comment_id, body) do
+    send_event({:memory_tracker_comment_update, comment_id, body})
     :ok
   end
 
@@ -49,6 +63,10 @@ defmodule SymphonyElixir.Tracker.Memory do
 
   defp configured_issues do
     Application.get_env(:symphony_elixir, :memory_tracker_issues, [])
+  end
+
+  defp configured_comment_bodies do
+    Application.get_env(:symphony_elixir, :memory_tracker_comment_bodies, %{})
   end
 
   defp issue_entries do
