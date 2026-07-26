@@ -27,9 +27,9 @@ defmodule SymphonyElixir.DaemonWake do
           | :missing_created_at
           | :duplicate_workpad_anchors
   @type config :: %{
-          optional(:daemon_states) => [String.t()] | MapSet.t(),
-          optional(:daemon_dispatch_states) => [String.t()] | MapSet.t(),
-          optional(:terminal_states) => [String.t()] | MapSet.t(),
+          optional(:daemon_states) => [String.t()],
+          optional(:daemon_dispatch_states) => [String.t()],
+          optional(:terminal_states) => [String.t()],
           optional(:daemon_default_wake) => String.t()
         }
   @type t :: %__MODULE__{
@@ -42,15 +42,15 @@ defmodule SymphonyElixir.DaemonWake do
 
   @spec evaluate(Issue.t(), DateTime.t(), config(), keyword()) :: t()
   def evaluate(%Issue{} = issue, %DateTime{} = now, %{} = config, opts \\ []) do
-    daemon_states = normalized_set(config_value(config, :daemon_states, []))
-    dispatch_states = normalized_set(config_value(config, :daemon_dispatch_states, []))
+    daemon_states = normalized_states(config_value(config, :daemon_states, []))
+    dispatch_states = normalized_states(config_value(config, :daemon_dispatch_states, []))
     state = normalize_string(issue.state)
 
     cond do
-      MapSet.member?(dispatch_states, state) ->
+      state in dispatch_states ->
         %__MODULE__{status: :dispatching}
 
-      not MapSet.member?(daemon_states, state) ->
+      state not in daemon_states ->
         %__MODULE__{status: :not_daemon}
 
       blockers = incomplete_blockers(issue, config) ->
@@ -125,7 +125,7 @@ defmodule SymphonyElixir.DaemonWake do
   end
 
   defp incomplete_blockers(issue, config) do
-    terminal_states = normalized_set(config_value(config, :terminal_states, []))
+    terminal_states = normalized_states(config_value(config, :terminal_states, []))
 
     blockers =
       issue.blocked_by
@@ -133,7 +133,7 @@ defmodule SymphonyElixir.DaemonWake do
         blocker
         |> map_value(:state, "state")
         |> normalize_string()
-        |> then(&MapSet.member?(terminal_states, &1))
+        |> then(&(&1 in terminal_states))
       end)
 
     if blockers == [], do: nil, else: blockers
@@ -225,21 +225,14 @@ defmodule SymphonyElixir.DaemonWake do
     Map.get(map, atom_key) || Map.get(map, string_key)
   end
 
-  defp normalized_set(%MapSet{} = values) do
+  defp normalized_states(values) when is_list(values) do
     values
     |> Enum.map(&normalize_string/1)
     |> Enum.reject(&(&1 == ""))
-    |> MapSet.new()
+    |> Enum.uniq()
   end
 
-  defp normalized_set(values) when is_list(values) do
-    values
-    |> Enum.map(&normalize_string/1)
-    |> Enum.reject(&(&1 == ""))
-    |> MapSet.new()
-  end
-
-  defp normalized_set(_values), do: MapSet.new()
+  defp normalized_states(_values), do: []
 
   defp normalize_wake(value) do
     value
