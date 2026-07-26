@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, SymphonyWorkpad, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -138,6 +138,8 @@ defmodule SymphonyElixir.Orchestrator do
         state = record_session_completion_totals(state, running_entry)
         session_id = running_entry_session_id(running_entry)
 
+        record_workpad_last_run(running_entry)
+
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
 
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
@@ -261,6 +263,7 @@ defmodule SymphonyElixir.Orchestrator do
 
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
+         issues <- ensure_candidate_workpads(issues),
          true <- available_slots(state) > 0 do
       choose_issues(issues, state)
     else
@@ -560,6 +563,8 @@ defmodule SymphonyElixir.Orchestrator do
         state = record_session_completion_totals(state, running_entry)
         worker_host = Map.get(running_entry, :worker_host)
 
+        record_workpad_last_run(running_entry)
+
         if cleanup_workspace do
           cleanup_issue_workspace(identifier, worker_host)
         end
@@ -746,6 +751,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp stop_and_block_issue(%State{} = state, issue_id, running_entry, error) do
+    record_workpad_last_run(running_entry)
+
     stop_running_task(
       Map.get(running_entry, :pid),
       Map.get(running_entry, :ref),
@@ -922,7 +929,17 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+        case ensure_workpad_before_dispatch(refreshed_issue) do
+          :existing ->
+            do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
+
+          :created ->
+            Logger.info("Created Symphony workpad; delaying dispatch until anchor metadata is visible: #{issue_context(refreshed_issue)}")
+            release_issue_claim(state, refreshed_issue.id)
+
+          :error ->
+            release_issue_claim(state, refreshed_issue.id)
+        end
 
       {:skip, :missing} ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
@@ -1201,6 +1218,51 @@ defmodule SymphonyElixir.Orchestrator do
         retry_attempts: Map.delete(state.retry_attempts, issue_id)
     }
   end
+
+  defp ensure_candidate_workpads(issues) when is_list(issues) do
+    issues
+    |> Enum.reduce([], fn
+      %Issue{} = issue, acc ->
+        case ensure_workpad_before_dispatch(issue) do
+          :existing -> [issue | acc]
+          :created -> acc
+          :error -> acc
+        end
+
+      issue, acc ->
+        [issue | acc]
+    end)
+    |> Enum.reverse()
+  end
+
+  defp ensure_candidate_workpads(issues), do: issues
+
+  defp ensure_workpad_before_dispatch(%Issue{} = issue) do
+    case SymphonyWorkpad.ensure_created(issue) do
+      {:ok, :existing} ->
+        :existing
+
+      {:ok, :created} ->
+        Logger.info("Created Symphony workpad for #{issue_context(issue)}")
+        :created
+
+      {:error, reason} ->
+        Logger.warning("Skipping dispatch; failed to ensure Symphony workpad for #{issue_context(issue)}: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  defp record_workpad_last_run(%{issue: %Issue{} = issue}) do
+    case SymphonyWorkpad.record_last_run(issue) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Failed to update Symphony workpad after agent run for #{issue_context(issue)}: #{inspect(reason)}")
+    end
+  end
+
+  defp record_workpad_last_run(_running_entry), do: :ok
 
   defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
     if metadata[:delay_type] == :continuation and attempt == 1 do
