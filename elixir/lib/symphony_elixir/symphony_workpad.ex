@@ -13,6 +13,8 @@ defmodule SymphonyElixir.SymphonyWorkpad do
   @spec ensure_created(Issue.t()) :: {:ok, ensure_result()} | {:error, term()}
   def ensure_created(%Issue{id: issue_id, comments: comments})
       when is_binary(issue_id) and is_list(comments) do
+    # The poll query filters comments to Issue.workpad_title/0; an empty list
+    # here means no Symphony workpad anchor, not no comments on the ticket.
     if comments == [] do
       case Tracker.create_comment(issue_id, new_body()) do
         :ok -> {:ok, :created}
@@ -39,12 +41,9 @@ defmodule SymphonyElixir.SymphonyWorkpad do
 
   @spec anchor_updated_at(Issue.t()) :: {:ok, DateTime.t()} | {:error, term()}
   def anchor_updated_at(%Issue{} = issue) do
-    with {:ok, comment} <- latest_anchor_comment(issue),
-         %DateTime{} = updated_at <- Map.get(comment, :updated_at) do
-      {:ok, updated_at}
-    else
-      nil -> {:error, :missing_workpad_anchor}
-      _ -> {:error, :missing_workpad_anchor}
+    case latest_anchor_comment(issue) do
+      {:ok, %{updated_at: updated_at}} -> {:ok, updated_at}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -56,17 +55,8 @@ defmodule SymphonyElixir.SymphonyWorkpad do
     Issue.workpad_title() <> "\n" <> @last_run_prefix <> DateTime.to_iso8601(DateTime.truncate(ran_at, :second))
   end
 
-  defp anchor_comment_id(%Issue{} = issue) do
-    with {:ok, comment} <- latest_anchor_comment(issue),
-         comment_id when is_binary(comment_id) <- Map.get(comment, :id) do
-      {:ok, comment_id}
-    else
-      nil -> {:error, :missing_workpad_anchor}
-      _ -> {:error, :missing_workpad_anchor}
-    end
-  end
-
-  defp latest_anchor_comment(%Issue{comments: comments}) when is_list(comments) do
+  @spec latest_anchor_comment(Issue.t()) :: {:ok, Issue.comment_ref()} | {:error, :missing_workpad_anchor}
+  def latest_anchor_comment(%Issue{comments: comments}) when is_list(comments) do
     comments
     |> Enum.filter(&match?(%DateTime{}, Map.get(&1, :updated_at)))
     |> Enum.max_by(
@@ -80,5 +70,12 @@ defmodule SymphonyElixir.SymphonyWorkpad do
     end
   end
 
-  defp latest_anchor_comment(%Issue{}), do: {:error, :missing_workpad_anchor}
+  def latest_anchor_comment(%Issue{}), do: {:error, :missing_workpad_anchor}
+
+  defp anchor_comment_id(%Issue{} = issue) do
+    case latest_anchor_comment(issue) do
+      {:ok, %{id: comment_id}} when is_binary(comment_id) -> {:ok, comment_id}
+      _ -> {:error, :missing_workpad_anchor}
+    end
+  end
 end

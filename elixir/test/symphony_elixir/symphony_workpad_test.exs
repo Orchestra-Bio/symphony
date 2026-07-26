@@ -3,6 +3,10 @@ defmodule SymphonyElixir.SymphonyWorkpadTest do
 
   alias SymphonyElixir.SymphonyWorkpad
 
+  defmodule FailingLinearClient do
+    def graphql(_query, _variables), do: {:error, :boom}
+  end
+
   setup do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
@@ -19,6 +23,17 @@ defmodule SymphonyElixir.SymphonyWorkpadTest do
              SymphonyWorkpad.ensure_created(issue(%{id: "issue-existing", comments: [comment("comment-1", ~U[2026-07-26 15:00:00Z])]}))
 
     refute_receive {:memory_tracker_comment, "issue-existing", _body}, 50
+  end
+
+  test "ensure_created reports missing issue ids and create failures" do
+    assert {:error, :missing_issue_id} =
+             SymphonyWorkpad.ensure_created(issue(%{id: nil, comments: []}))
+
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
+    Application.put_env(:symphony_elixir, :linear_client_module, FailingLinearClient)
+
+    assert {:error, :boom} =
+             SymphonyWorkpad.ensure_created(issue(%{id: "issue-fail", comments: []}))
   end
 
   test "record_last_run updates the newest filtered workpad comment in place" do
@@ -44,6 +59,18 @@ defmodule SymphonyElixir.SymphonyWorkpadTest do
     assert {:error, :missing_workpad_anchor} =
              SymphonyWorkpad.record_last_run(issue(%{comments: []}), ~U[2026-07-26 15:42:07Z])
 
+    assert {:error, :missing_workpad_anchor} =
+             SymphonyWorkpad.record_last_run(
+               issue(%{comments: [comment(nil, ~U[2026-07-26 15:00:00Z])]}),
+               ~U[2026-07-26 15:42:07Z]
+             )
+
+    assert {:error, :missing_workpad_anchor} =
+             SymphonyWorkpad.anchor_updated_at(issue(%{comments: []}))
+
+    assert {:error, :missing_workpad_anchor} =
+             SymphonyWorkpad.latest_anchor_comment(issue(%{comments: nil}))
+
     refute_receive {:memory_tracker_comment_update, _comment_id, _body}, 50
     refute_receive {:memory_tracker_comment, _issue_id, _body}, 50
   end
@@ -63,6 +90,39 @@ defmodule SymphonyElixir.SymphonyWorkpadTest do
 
     assert_receive {:memory_tracker_comment, "issue-create", "## Symphony Workpad\nNew"}, 1_000
     refute_receive {:memory_tracker_comment, "issue-create", _body}, 100
+  end
+
+  test "dispatch revalidation skips missing anchor metadata instead of creating a duplicate" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+
+    candidate_issue =
+      issue(%{
+        id: "issue-race",
+        identifier: "ABC-301",
+        title: "Anchor race",
+        comments: [comment("comment-existing", ~U[2026-07-26 15:00:00Z])]
+      })
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [%{candidate_issue | comments: []}])
+
+    state = %Orchestrator.State{
+      max_concurrent_agents: 1,
+      running: %{},
+      claimed: MapSet.new([candidate_issue.id]),
+      blocked: %{},
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
+
+    log =
+      capture_log(fn ->
+        updated_state = Orchestrator.dispatch_issue_for_test(state, candidate_issue)
+
+        refute MapSet.member?(updated_state.claimed, candidate_issue.id)
+      end)
+
+    assert log =~ "Symphony workpad anchor metadata is not visible yet"
+    refute_receive {:memory_tracker_comment, "issue-race", _body}, 50
   end
 
   test "orchestrator records Last run for successful and failed agent exits" do

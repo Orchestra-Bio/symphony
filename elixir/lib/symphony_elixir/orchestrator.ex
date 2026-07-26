@@ -399,6 +399,12 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
+  @spec dispatch_issue_for_test(term(), Issue.t()) :: term()
+  def dispatch_issue_for_test(%State{} = state, %Issue{} = issue) do
+    dispatch_issue(state, issue)
+  end
+
+  @doc false
   @spec sort_issues_for_dispatch_for_test([Issue.t()]) :: [Issue.t()]
   def sort_issues_for_dispatch_for_test(issues) when is_list(issues) do
     sort_issues_for_dispatch(issues)
@@ -929,13 +935,9 @@ defmodule SymphonyElixir.Orchestrator do
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
-        case ensure_workpad_before_dispatch(refreshed_issue) do
-          :existing ->
+        case require_visible_workpad_anchor(refreshed_issue) do
+          :ok ->
             do_dispatch_issue(state, refreshed_issue, attempt, preferred_worker_host)
-
-          :created ->
-            Logger.info("Created Symphony workpad; delaying dispatch until anchor metadata is visible: #{issue_context(refreshed_issue)}")
-            release_issue_claim(state, refreshed_issue.id)
 
           :error ->
             release_issue_claim(state, refreshed_issue.id)
@@ -1223,7 +1225,7 @@ defmodule SymphonyElixir.Orchestrator do
     issues
     |> Enum.reduce([], fn
       %Issue{} = issue, acc ->
-        case ensure_workpad_before_dispatch(issue) do
+        case create_missing_workpad_anchor(issue) do
           :existing -> [issue | acc]
           :created -> acc
           :error -> acc
@@ -1237,7 +1239,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp ensure_candidate_workpads(issues), do: issues
 
-  defp ensure_workpad_before_dispatch(%Issue{} = issue) do
+  defp create_missing_workpad_anchor(%Issue{} = issue) do
     case SymphonyWorkpad.ensure_created(issue) do
       {:ok, :existing} ->
         :existing
@@ -1248,6 +1250,17 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:error, reason} ->
         Logger.warning("Skipping dispatch; failed to ensure Symphony workpad for #{issue_context(issue)}: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  defp require_visible_workpad_anchor(%Issue{} = issue) do
+    case SymphonyWorkpad.latest_anchor_comment(issue) do
+      {:ok, _comment} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.info("Skipping dispatch; Symphony workpad anchor metadata is not visible yet for #{issue_context(issue)}: #{inspect(reason)}")
         :error
     end
   end

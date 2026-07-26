@@ -58,6 +58,21 @@ defmodule SymphonyElixir.DaemonWakeTest do
     assert decision.warnings == [:missing_workpad_anchor]
   end
 
+  test "malformed comment metadata falls back to issue created_at" do
+    issue =
+      issue(%{
+        labels: ["wake:1h"],
+        comments: nil,
+        created_at: ~U[2026-07-26 09:00:00Z]
+      })
+
+    decision = DaemonWake.evaluate(issue, ~U[2026-07-26 09:30:00Z], @config, jitter_fun: zero_jitter())
+
+    assert decision.status == :sleep
+    assert decision.next_wake_at == ~U[2026-07-26 10:00:00Z]
+    assert decision.warnings == [:missing_workpad_anchor]
+  end
+
   test "missing comment anchor and created_at is invalid" do
     issue =
       issue(%{

@@ -381,7 +381,8 @@ defmodule SymphonyElixir.CoreTest do
       description: "Keep one worker active while the orchestrator restarts",
       state: "In Progress",
       url: "https://example.org/issues/MT-#{issue_suffix}",
-      labels: []
+      labels: [],
+      comments: [%{id: "comment-restart-#{issue_suffix}", updated_at: ~U[2026-07-26 15:00:00Z]}]
     }
 
     on_exit(fn ->

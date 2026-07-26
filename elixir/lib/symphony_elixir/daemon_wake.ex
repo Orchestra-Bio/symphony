@@ -3,7 +3,7 @@ defmodule SymphonyElixir.DaemonWake do
   Pure daemon timer wake evaluator.
   """
 
-  alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.{Linear.Issue, SymphonyWorkpad}
 
   @jitter_offsets_seconds [-60, -30, 0, 30, 60]
   @supported_wakes %{
@@ -183,23 +183,14 @@ defmodule SymphonyElixir.DaemonWake do
   defp supported_wake_label?("wake:" <> cadence), do: Map.has_key?(@supported_wakes, cadence)
 
   defp resolve_anchor(issue) do
-    anchor_comments =
-      issue.comments
-      |> Enum.flat_map(fn comment ->
-        case comment_updated_at(comment) do
-          %DateTime{} = updated_at -> [%{comment: comment, updated_at: updated_at}]
-          _updated_at -> []
-        end
-      end)
-
     duplicate_warning =
-      if length(anchor_comments) > 1, do: [:duplicate_workpad_anchors], else: []
+      if filtered_anchor_comment_count(issue) > 1, do: [:duplicate_workpad_anchors], else: []
 
-    case latest_anchor(anchor_comments) do
-      %{comment: comment, updated_at: updated_at} ->
-        {:ok, comment_id(comment), updated_at, duplicate_warning}
+    case SymphonyWorkpad.latest_anchor_comment(issue) do
+      {:ok, %{updated_at: %DateTime{} = updated_at} = comment} ->
+        {:ok, Map.get(comment, :id), updated_at, duplicate_warning}
 
-      nil ->
+      {:error, :missing_workpad_anchor} ->
         case issue.created_at do
           %DateTime{} = created_at ->
             {:ok, nil, created_at, [:missing_workpad_anchor]}
@@ -210,17 +201,11 @@ defmodule SymphonyElixir.DaemonWake do
     end
   end
 
-  defp latest_anchor(anchor_comments) do
-    Enum.max_by(
-      anchor_comments,
-      & &1.updated_at,
-      fn left, right -> DateTime.compare(left, right) != :lt end,
-      fn -> nil end
-    )
+  defp filtered_anchor_comment_count(%Issue{comments: comments}) when is_list(comments) do
+    Enum.count(comments, &match?(%DateTime{}, Map.get(&1, :updated_at)))
   end
 
-  defp comment_updated_at(comment), do: Map.get(comment, :updated_at)
-  defp comment_id(comment), do: Map.get(comment, :id)
+  defp filtered_anchor_comment_count(%Issue{}), do: 0
 
   defp normalized_states(values) do
     values
