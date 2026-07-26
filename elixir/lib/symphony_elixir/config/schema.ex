@@ -111,52 +111,56 @@ defmodule SymphonyElixir.Config.Schema do
     end
 
     defp validate_daemon_state_contract(changeset) do
-      active_states = normalized_set(get_field(changeset, :active_states))
-      terminal_states = normalized_set(get_field(changeset, :terminal_states))
-      daemon_states = normalized_set(get_field(changeset, :daemon_states))
-      daemon_dispatch_states = normalized_set(get_field(changeset, :daemon_dispatch_states))
+      active_states = normalized_state_list(get_field(changeset, :active_states))
+      terminal_states = normalized_state_list(get_field(changeset, :terminal_states))
+      daemon_states = normalized_state_list(get_field(changeset, :daemon_states))
+      daemon_dispatch_states = normalized_state_list(get_field(changeset, :daemon_dispatch_states))
 
       changeset
       |> maybe_add_error(
         :daemon_dispatch_states,
-        MapSet.size(daemon_states) > 0 and MapSet.size(daemon_dispatch_states) == 0,
+        daemon_states != [] and daemon_dispatch_states == [],
         "must be configured when daemon_states is non-empty"
       )
       |> maybe_add_error(
         :daemon_dispatch_states,
-        not MapSet.subset?(daemon_dispatch_states, active_states),
+        not subset?(daemon_dispatch_states, active_states),
         "must be listed in tracker.active_states"
       )
       |> maybe_add_error(
         :daemon_states,
-        not MapSet.disjoint?(daemon_states, active_states),
+        not disjoint?(daemon_states, active_states),
         "must be disjoint from tracker.active_states"
       )
       |> maybe_add_error(
         :daemon_states,
-        not MapSet.disjoint?(daemon_states, terminal_states),
+        not disjoint?(daemon_states, terminal_states),
         "must be disjoint from tracker.terminal_states"
       )
       |> maybe_add_error(
         :daemon_dispatch_states,
-        not MapSet.disjoint?(daemon_dispatch_states, daemon_states),
+        not disjoint?(daemon_dispatch_states, daemon_states),
         "must be disjoint from tracker.daemon_states"
       )
       |> maybe_add_error(
         :daemon_dispatch_states,
-        not MapSet.disjoint?(daemon_dispatch_states, terminal_states),
+        not disjoint?(daemon_dispatch_states, terminal_states),
         "must be disjoint from tracker.terminal_states"
       )
     end
 
-    defp normalized_set(values) when is_list(values) do
+    defp normalized_state_list(values) when is_list(values) do
       values
       |> Enum.map(&Schema.normalize_issue_state/1)
       |> Enum.reject(&(&1 == ""))
-      |> MapSet.new()
+      |> Enum.uniq()
     end
 
-    defp normalized_set(_values), do: MapSet.new()
+    defp normalized_state_list(_values), do: []
+
+    defp subset?(values, allowed_values), do: Enum.all?(values, &(&1 in allowed_values))
+
+    defp disjoint?(left_values, right_values), do: Enum.all?(left_values, &(&1 not in right_values))
 
     defp maybe_add_error(changeset, field, true, message), do: add_error(changeset, field, message)
     defp maybe_add_error(changeset, _field, false, _message), do: changeset
