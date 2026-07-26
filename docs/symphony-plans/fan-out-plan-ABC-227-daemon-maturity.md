@@ -7,7 +7,6 @@ seed_issue: ABC-227
 target_project: Daemon Tickets + Maturity-Gated Dependencies (symphony fork)
 target_repo: https://github.com/Orchestra-Bio/symphony.git
 base_branch: main
-integration_branch: symphony/daemon-maturity/integration
 human_lead: Jeremy Carroll
 human_lead_github: jeremycarroll
 linear_issue_labels:
@@ -71,6 +70,15 @@ Authoritative project sources:
 - Linear issues `ABC-292` / `DMAT-012` and `ABC-295` / `DMAT-013` from
   2026-07-25. These establish `tracker.team_key` as required switchover work
   and Linear team configuration as operator-owned prerequisite work.
+- GitHub PR #10 human review, follow-up, and decision comments from 2026-07-26.
+  These are the decision source for narrowing comment refs to `id`/`updatedAt`,
+  defaulting `maturity_labels` to `[]`, and replacing the nonexistent
+  `make -C elixir specs.check` instruction with `mix specs.check`.
+- Linear issue `ABC-297` / `DMAT-015` from 2026-07-26. This
+  documentation-defect cleanup is the source for removing obsolete
+  integration-branch workflow from this plan, retaining plural
+  `daemon_dispatch_states`, keeping config-schema ownership in `DMAT-006`, and
+  updating validation commands.
 
 Background sources read, superseded where they conflict with the merged
 requirements/design:
@@ -128,10 +136,8 @@ Unavailable sources: none.
 - Planning branch base: `main`.
 - Planning baseline `HEAD`: `37aea82ec23d8786b5e415f3f0a191bbd28a0f5f`.
 - Target implementation repository: `Orchestra-Bio/symphony`.
-- Project integration branch
-  `symphony/daemon-maturity/integration` exists at
-  `28e21f61bc24631e8dc1668c102a5cefd67bb97f` and is tree-equal to `main` at
-  planning time.
+- No project integration branch is used for this corrected plan; each task PR to
+  `main` is the project's only integration step.
 - No open PR existed in `Orchestra-Bio/symphony` for branch
   `symphony/daemon-maturity/ABC-227/plan-project` at planning time.
 - Prior `orc-app` plan PRs #3787 and #3866 are closed and not reused.
@@ -244,9 +250,9 @@ assigned to Jeremy Carroll when Linear identity resolution is available.
 
 Fan-out dependencies below are human promotion guidance, not Linear blocker
 relations, unless a human explicitly requests blocker links after reviewing
-this plan. For this integration-branch project, a dependency is satisfied when
-the upstream issue is project-integrated into
-`symphony/daemon-maturity/integration` with validation evidence recorded.
+this plan. There is no project integration branch; a dependency is satisfied
+when the upstream issue's PR is merged to `main`, or when the dependency entry
+explicitly allows a human-accepted fallback.
 
 The original fan-out produced inert `Backlog` tickets. Nothing starts until a
 human promotes a ticket out of `Backlog`. This is intentional: the project is
@@ -261,7 +267,7 @@ Suggested human promotion order:
 - Promote `DMAT-001`, `DMAT-002`, and `DMAT-004` first to verify the Linear,
   upstream, relation, label, and state-category mechanics that implementation
   depends on. `DMAT-003` is canceled and no longer participates in promotion.
-- Project-integrate `DMAT-012` before any deployment switchover depends on the
+- Merge `DMAT-012` to `main` before any deployment switchover depends on the
   fork, because the live workflow polls by team key.
 - Promote daemon implementation next: `DMAT-006`, `DMAT-007`, `DMAT-008`, and
   `DMAT-009`, preserving each item's dependency entries before promotion.
@@ -269,7 +275,7 @@ Suggested human promotion order:
   and labels. The setup gaps found by `DMAT-004` feed `DMAT-013`; they are not
   promotion blockers for implementation tickets that only consume configured
   strings.
-- After daemon lifecycle behavior is project-integrated and required team
+- After daemon lifecycle behavior is merged to `main` and required team
   configuration exists, promote the sentinel portion of `DMAT-011` and let the
   real daemon run.
 - Promote `DMAT-010` last for the blocker-gate replacement, with
@@ -302,8 +308,7 @@ dependency entries in each ticket description plus this promotion runbook.
 - Do not pre-document conventions that have not landed. `DIVERGENCES.md` is
   written or updated only after behavior has landed; cookbook docs grow as
   operator conventions exist.
-- Record isolated validation on each clean task branch and composed validation
-  after merging into `symphony/daemon-maturity/integration`.
+- Record validation on each clean task branch and PR to `main`.
 - If a ticket introduces a project-scoped TODO, stub, adapter, disabled path,
   compatibility export, or temporary flag, it must record the temporary seam in
   its issue and PR body before handoff.
@@ -323,11 +328,11 @@ repository `Orchestra-Bio/symphony`.
 
 scope: Verify the daemon wake rule's required Linear data path before any daemon
 implementation relies on it. Confirm the normalized comment metadata shape for
-`id`, `createdAt`, and `updatedAt`; the narrow body fetch needed to identify a
-titled workpad comment when an unrecognized comment id appears; `wake:*` label
-visibility; blocking-relation visibility for blocked daemon dormancy; and
-schema availability for `commentUpdate`. Do not re-open the already-verified
-platform fact that `Comment.updatedAt` exists and advances on edit.
+`id` and `updatedAt`; the narrow body fetch needed to identify a titled workpad
+comment when an unrecognized comment id appears; `wake:*` label visibility;
+blocking-relation visibility for blocked daemon dormancy; and schema
+availability for `commentUpdate`. Do not re-open the already-verified platform
+fact that `Comment.updatedAt` exists and advances on edit.
 
 source_files:
 
@@ -368,8 +373,8 @@ required_actions:
 
 - Inspect the current Linear GraphQL query and adapter code to record that the
   engine has `create_comment/2`, no `commentUpdate`, and no comment read path.
-- Verify or fixture the smallest comment metadata selection containing
-  `id`, `createdAt`, and `updatedAt`.
+- Verify or fixture the smallest comment metadata selection containing `id` and
+  `updatedAt`.
 - Verify the narrow query for fetching a comment body by id when a new comment
   id must be matched to a titled workpad heading.
 - Verify `wake:15m`, `wake:1h`, `wake:4h`, and `wake:1d` label visibility in
@@ -708,7 +713,7 @@ source_notes:
 dependencies:
 
 - item: DMAT-004
-  type: integration
+  type: sequencing
   requires: Linear mechanics verification findings are available
   reason: team setup should apply the verified state/category and label
   requirements instead of guessing.
@@ -788,27 +793,27 @@ source_notes:
 - Requirements R1, R4, R10, and R19.
 - Design sections for config, state taxonomy, recurring-work budget, and
   blocker snapshot shape.
-- This item owns the four tracker config fields named in the requirements:
-  `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`, and
-  `maturity_labels`.
+- This item owns the five tracker config fields named in the requirements:
+  `daemon_states`, `daemon_dispatch_states`, `daemon_default_wake`,
+  `maturity_labels`, and `maturity_gate_state_scope`.
 
 dependencies:
 
 - item: DMAT-001
-  type: integration
-  requires: daemon Linear fetch verification is project-integrated or blocked
+  type: sequencing
+  requires: daemon Linear fetch verification is merged to `main` or blocked
   with an accepted fallback
   reason: model fields should match data Linear can provide.
 - item: DMAT-002
-  type: integration
-  requires: SPEC/retry verification is project-integrated or human-accepted
+  type: sequencing
+  requires: SPEC/retry verification is merged to `main` or human-accepted
   drift is recorded
   reason: config additions must stay compatible with the upstream config
   contract.
 - item: DMAT-004
-  type: integration
+  type: sequencing
   requires: maturity and custom-state mechanics verification is
-  project-integrated or blocked with accepted fallback
+  merged to `main` or blocked with accepted fallback
   reason: daemon dispatch-state and blocker-label fields should match verified
   Linear mechanics.
 
@@ -823,7 +828,9 @@ required_actions:
 
 - Add typed config fields for `tracker.daemon_states`,
   `tracker.daemon_dispatch_states`, `tracker.daemon_default_wake`, and
-  `tracker.maturity_labels` using existing schema patterns.
+  `tracker.maturity_labels` using existing schema patterns. Add
+  `tracker.maturity_gate_state_scope`, defaulting to `["todo"]`, in the same
+  schema pass.
 - Add helper accessors through `SymphonyElixir.Config` instead of ad-hoc env
   reads.
 - Validate disjointness between daemon states, daemon dispatch states, active
@@ -832,6 +839,8 @@ required_actions:
   `daemon_dispatch_states` set when `daemon_states` is non-empty.
 - Preserve existing defaults when new config is absent; daemon/maturity
   behavior must be inert unless configured data makes it applicable.
+  `maturity_labels` defaults to `[]`; `["mature"]` is the standard explicit
+  enablement value.
 - Extend `SymphonyElixir.Linear.Issue` or supporting structs for normalized
   blocker labels and comment metadata consumed by later helpers.
 - Use existing `agent.max_concurrent_agents_by_state` for daemon budget
@@ -841,10 +850,10 @@ acceptance_checks:
 
 - Tests prove workflows that omit daemon/maturity fields retain existing
   behavior.
-- Tests prove daemon states, daemon dispatch states, maturity labels, and
-  default wake values are normalized and validated.
+- Tests prove daemon states, daemon dispatch states, maturity labels, maturity
+  gate state scope, and default wake values are normalized and validated.
 - Tests prove no `daemon_label` or class-budget config is accepted.
-- Targeted validation includes new tests and `make -C elixir specs.check`.
+- Targeted validation includes new tests and, from `elixir/`, `mix specs.check`.
 
 split_criteria:
 
@@ -901,12 +910,12 @@ source_notes:
 dependencies:
 
 - item: DMAT-001
-  type: integration
-  requires: daemon Linear fetch verification is project-integrated
+  type: sequencing
+  requires: daemon Linear fetch verification is merged to `main`
   reason: the pure API should consume the verified comment metadata shape.
 - item: DMAT-006
-  type: integration
-  requires: config and normalized model runway is project-integrated
+  type: sequencing
+  requires: config and normalized model runway is merged to `main`
   reason: the wake engine should consume shared contracts rather than define
   duplicate fields.
 
@@ -1004,16 +1013,16 @@ source_notes:
 dependencies:
 
 - item: DMAT-001
-  type: integration
-  requires: daemon Linear fetch verification is project-integrated
+  type: sequencing
+  requires: daemon Linear fetch verification is merged to `main`
   reason: query and mutation shapes should match verified Linear API behavior.
 - item: DMAT-006
-  type: integration
-  requires: config and normalized model runway is project-integrated
+  type: sequencing
+  requires: config and normalized model runway is merged to `main`
   reason: Linear normalization should populate shared fields.
 - item: DMAT-007
-  type: integration
-  requires: timer-only wake engine API is project-integrated
+  type: sequencing
+  requires: timer-only wake engine API is merged to `main`
   reason: binding tests should exercise the downstream shape consumed by the
   wake engine.
 
@@ -1026,8 +1035,8 @@ initial_labels:
 
 required_actions:
 
-- Add bounded comment metadata reads for daemon sleep candidates: `id`,
-  `createdAt`, and `updatedAt`.
+- Add bounded comment metadata reads for daemon sleep candidates: `id` and
+  `updatedAt`.
 - Add a narrow body-fetch path for newly seen comment ids so a leading heading
   line can be matched to the writer title.
 - Add `commentUpdate` support beside existing `create_comment/2`, with memory
@@ -1042,8 +1051,8 @@ acceptance_checks:
 - Adapter tests prove `commentUpdate` success and failure handling without
   regressing existing `commentCreate` behavior.
 - Existing candidate fetch and tracker boundary tests continue to pass.
-- Targeted validation includes the new Linear client/adapter tests and
-  `make -C elixir specs.check`.
+- Targeted validation includes the new Linear client/adapter tests and, from
+  `elixir/`, `mix specs.check`.
 
 split_criteria:
 
@@ -1108,28 +1117,28 @@ source_notes:
 dependencies:
 
 - item: DMAT-002
-  type: integration
-  requires: SPEC and retry-boundary verification is project-integrated
+  type: sequencing
+  requires: SPEC and retry-boundary verification is merged to `main`
   reason: daemon parking must compose with current retry path rather than
   replace it blindly.
 - item: DMAT-004
-  type: integration
+  type: sequencing
   requires: state category and relation/label mechanics verification is
-  project-integrated
+  merged to `main`
   reason: daemon lease depends on verified `Started`-type state mechanics; the
   actual ABC team state setup is owned by `DMAT-013` and is not a dependency
   for implementation tests.
 - item: DMAT-006
-  type: integration
-  requires: config/model runway is project-integrated
+  type: sequencing
+  requires: config/model runway is merged to `main`
   reason: daemon lifecycle uses shared config and issue fields.
 - item: DMAT-007
-  type: integration
-  requires: timer-only wake engine is project-integrated
+  type: sequencing
+  requires: timer-only wake engine is merged to `main`
   reason: orchestrator should delegate wake calculation to tested pure logic.
 - item: DMAT-008
-  type: integration
-  requires: comment read/update binding is project-integrated
+  type: sequencing
+  requires: comment read/update binding is merged to `main`
   reason: exhaustion parking edits the orchestrator's titled workpad comment.
 
 integration_pattern: none
@@ -1166,8 +1175,8 @@ acceptance_checks:
   visible through per-state running counts.
 - Tests prove normal tickets without daemon config behave as before.
 - Targeted validation includes daemon lifecycle/retry tests and
-  `make -C elixir specs.check`; run `make -C elixir all` before handoff unless
-  blocked by environment.
+  `mix specs.check` from `elixir/`; run `make -C elixir all` before handoff
+  unless blocked by environment.
 
 split_criteria:
 
@@ -1200,9 +1209,9 @@ and dispatch-time revalidation. The gate replaces the hardcoded `Todo`-only
 terminal helper with shared `maturity_labels` logic, uses `{:gated, blockers}`
 naming, ignores daemon-state blockers with a warning, and emits one advisory
 comment per observed maturity regression without killing the dependent worker.
-It also owns the one-field rollout scope for the blocker gate:
-`maturity_gate_state_scope`, defaulting to `["todo"]`, so the fork engine can be
-switched with blocker behavior unchanged before a later human-approved widening.
+It consumes `maturity_gate_state_scope`, defined by `DMAT-006` with default
+`["todo"]`, so the fork engine can be switched with blocker behavior unchanged
+before a later human-approved widening.
 
 source_files:
 
@@ -1212,8 +1221,6 @@ source_files:
 - `elixir/lib/symphony_elixir/orchestrator.ex`
 - `elixir/lib/symphony_elixir/linear/client.ex`
 - `elixir/lib/symphony_elixir/linear/issue.ex`
-- `elixir/lib/symphony_elixir/config.ex`
-- `elixir/lib/symphony_elixir/config/schema.ex`
 - `elixir/docs/logging.md`
 
 owned_files:
@@ -1222,9 +1229,6 @@ owned_files:
 - `elixir/lib/symphony_elixir/orchestrator.ex`
 - `elixir/lib/symphony_elixir/linear/client.ex`
 - `elixir/lib/symphony_elixir/linear/issue.ex`
-- `elixir/lib/symphony_elixir/config.ex`
-- `elixir/lib/symphony_elixir/config/schema.ex`
-- `elixir/test/symphony_elixir/daemon_maturity_config_test.exs`
 - `elixir/test/symphony_elixir/maturity_gate_test.exs`
 - `elixir/test/symphony_elixir/orchestrator_maturity_gate_test.exs`
 
@@ -1233,6 +1237,8 @@ source_notes:
 - Requirements R10, R11, R12, R13, R14, R15, R16, and R18.
 - Design `Blocker Snapshot Shape`, `Gate Function`, `Stack Labels`,
   `Regression Prod`, and `Plan-Side Obligations`.
+- PR #10 decision: `maturity_labels` defaults to `[]`; `["mature"]` is the
+  standard explicit enablement value.
 - PR #2 `M-1`, `M-3`, and `M-4`: initial shared-helper call sites, Todo-gate
   divergence, and `{:gated, blockers}` result naming.
 - PR #3 review decision D-C: keep first rollout scoped to `["todo"]` so the
@@ -1244,18 +1250,18 @@ source_notes:
 dependencies:
 
 - item: DMAT-004
-  type: integration
+  type: sequencing
   requires: maturity relation and label mechanics verification is
-  project-integrated
+  merged to `main`
   reason: the gate must rely only on verified direct-blocker data.
 - item: DMAT-006
-  type: integration
-  requires: config/model runway is project-integrated
-  reason: the gate consumes shared `maturity_labels`, `daemon_states`, and
-  blocker-label fields.
+  type: sequencing
+  requires: config/model runway is merged to `main`
+  reason: the gate consumes shared `maturity_labels`, `daemon_states`,
+  `maturity_gate_state_scope`, and blocker-label fields.
 - item: DMAT-009
-  type: integration
-  requires: daemon lifecycle wiring is project-integrated or a human-approved
+  type: sequencing
+  requires: daemon lifecycle wiring is merged to `main` or a human-approved
   sequencing plan records shared orchestrator edits
   reason: both tickets edit `orchestrator.ex`; sequencing avoids competing
   central-file changes.
@@ -1272,9 +1278,9 @@ required_actions:
 - Extend blocker refs with normalized blocker labels from the verified Linear
   query shape.
 - Add `SymphonyElixir.MaturityGate` or an equivalent pure module.
-- Add typed config for `tracker.maturity_gate_state_scope`, defaulting to
-  `["todo"]`, and apply the maturity gate only to candidate issues whose
-  normalized state is in that scope.
+- Consume `tracker.maturity_gate_state_scope`, defined by `DMAT-006`, and apply
+  the maturity gate only to candidate issues whose normalized state is in that
+  scope.
 - Treat a direct blocker as satisfied when it is terminal or has a configured
   maturity label. Empty `maturity_labels` reproduces terminal-only behavior.
 - Ignore daemon-state blockers with a warning/diagnostic result because daemon
@@ -1304,8 +1310,8 @@ acceptance_checks:
 - Regression advisory tests prove duplicate comments are not emitted every tick
   and the worker is not killed.
 - Targeted validation includes maturity gate/orchestrator tests and
-  `make -C elixir specs.check`; run `make -C elixir all` before handoff unless
-  blocked by environment.
+  `mix specs.check` from `elixir/`; run `make -C elixir all` before handoff
+  unless blocked by environment.
 
 split_criteria:
 
@@ -1320,6 +1326,8 @@ exclusions:
 - Do not read GitHub state for maturity.
 - Do not enforce `max_stack_depth` in the engine.
 - Do not implement Project B branch-base or join-branch behavior.
+- Do not edit `config.ex` or `config/schema.ex`; all config-schema work belongs
+  to `DMAT-006`.
 
 ### DMAT-011 - Complete Cookbook And Real-Use Evidence
 
@@ -1376,17 +1384,17 @@ owned_external_resources:
 dependencies:
 
 - item: DMAT-009
-  type: integration
-  requires: daemon lifecycle and failure park are project-integrated
+  type: sequencing
+  requires: daemon lifecycle and failure park are merged to `main`
   reason: the sentinel must exercise implemented daemon behavior.
 - item: DMAT-010
-  type: integration
-  requires: maturity gate and regression advisory are project-integrated before
+  type: sequencing
+  requires: maturity gate and regression advisory are merged to `main` before
   the maturity portion of this ticket is claimed complete
   reason: the DAG and regression observations must exercise implemented
   maturity behavior.
 - item: DMAT-013
-  type: integration
+  type: sequencing
   requires: expected team states and labels are documented, created, and
   verified before real-use execution
   reason: real daemon and maturity use needs actual Linear state/label setup;
@@ -1495,13 +1503,13 @@ source_notes:
 dependencies:
 
 - item: DMAT-009
-  type: integration
-  requires: daemon lifecycle and failure park are project-integrated
+  type: sequencing
+  requires: daemon lifecycle and failure park are merged to `main`
   reason: daemon divergence text should describe implemented daemon behavior,
   not planned behavior.
 - item: DMAT-010
-  type: integration
-  requires: maturity gate and regression advisory are project-integrated
+  type: sequencing
+  requires: maturity gate and regression advisory are merged to `main`
   reason: maturity divergence text should describe the implemented blocker gate
   and rollout scope.
 - item: DMAT-011
@@ -1562,10 +1570,10 @@ exclusions:
   Linear states.
 - The human promotion runbook has been followed or explicitly amended in the
   relevant ticket workpads before project final acceptance.
-- `DMAT-001`, `DMAT-002`, and `DMAT-004` are project-integrated or explicitly
+- `DMAT-001`, `DMAT-002`, and `DMAT-004` are merged to `main` or explicitly
   blocked with accepted human decisions before dependent implementation tickets
   are promoted. `DMAT-003` is canceled and no longer participates.
-- `DMAT-012` is project-integrated before deployment switchover relies on the
+- `DMAT-012` is merged to `main` before deployment switchover relies on the
   fork's team-scoped workflow.
 - `DMAT-013` creates/verifies required team state and label setup before real
   use or deployment switchover relies on those names.
@@ -1640,7 +1648,6 @@ Each generated or human-added ticket payload must include:
 - Target repository: `https://github.com/Orchestra-Bio/symphony.git`
 - Assignee: Jeremy Carroll when identity resolution is available
 - Base branch: `main`
-- Integration branch: `symphony/daemon-maturity/integration`
 - Source inputs and source notes copied from the item
 - Owned files copied from `owned_files`
 - Owned external resources copied from `owned_external_resources` when present

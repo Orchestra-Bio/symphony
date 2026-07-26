@@ -111,6 +111,13 @@ Local workflow and review sources:
   2026-07-25. It is the human-directed replan pass that records the decisions
   above and the Item 12 plural `daemon_dispatch_states` decision in the
   canonical documents.
+- GitHub PR #10 human review, follow-up, and decision comments from 2026-07-26.
+  These are the human-decision source for narrowing daemon comment refs to
+  `id`/`updatedAt`, defaulting `maturity_labels` to `[]`, and replacing the
+  nonexistent `make -C elixir specs.check` instruction with `mix specs.check`.
+- Linear issue `ABC-297` / `DMAT-015`, read through Symphony Linear GraphQL on
+  2026-07-26. It is the documentation-defect cleanup pass that applies the PR
+  #10 decisions and removes stale integration-branch fan-out wording.
 
 Repo context:
 
@@ -150,6 +157,9 @@ handoffs.
 - `S16`: Linear issues `ABC-292` / `DMAT-012` and `ABC-295` / `DMAT-013`.
 - `S17`: Linear issue `ABC-296` / `DMAT-014` replan direction, including the
   Item 12 plural `daemon_dispatch_states` decision.
+- `S18`: GitHub PR #10 human review, follow-up, and decision comments from
+  2026-07-26.
+- `S19`: Linear issue `ABC-297` / `DMAT-015` documentation-defect cleanup.
 
 ## Goal
 
@@ -175,9 +185,8 @@ label, while terminal blockers remain the upstream-compatible case. [S3, S5]
 - Implementation surface: the Elixir/OTP Symphony reference implementation in
   the fork. [S3, S4, S5, S10]
 - Selected base branch: `main`. [S1, S2, S7]
-- The project-level integration branch is
-  `symphony/daemon-maturity/integration`, but this requirements PR remains based
-  on `main`. [S1, S2, S7]
+- No project integration branch is used for the corrected fan-out workflow; each
+  task PR to `main` is the project's only integration step. [S19]
 - Project metadata labels for workflow routing are Linear label `pink` and
   GitHub PR labels `pink` and `symphony`; those labels are process metadata, not
   product requirements. [S1, S2]
@@ -310,13 +319,16 @@ pattern, not orchestrator-level project semantics. [S1, S2, S3, S4]
 
 Use Linear native blocks and blocked-by relations as the edge source of truth.
 A blocked ticket is dispatch-eligible when every direct blocker is terminal or
-carries one configured maturity label. The default maturity label set is
-`["mature"]`. An empty maturity-label configuration reproduces upstream
-terminal-only behavior. Daemon-state blockers are the exception handled by R15.
-`maturity_gate_state_scope` limits which candidate issue states receive the
-blocker-gate replacement; its default is `["todo"]`, preserving the current
-hardcoded `Todo` scope so the engine switch and later gate widening can be
-diagnosed separately. [S3, S5, S13, S17]
+carries one configured maturity label. The default maturity label set is `[]`,
+which reproduces upstream terminal-only behavior. `["mature"]` is the standard
+explicit value when the maturity gate is enabled, not the default. Every
+fork-added config field defaults to upstream behavior so divergence is opt-in
+and default configuration can be documented as upstream-compatible. Daemon-state
+blockers are the exception handled by R15. `maturity_gate_state_scope` limits
+which candidate issue states receive the blocker-gate replacement; its default
+is `["todo"]`, preserving the current hardcoded `Todo` scope so the engine
+switch and later gate widening can be diagnosed separately. [S3, S5, S13, S17,
+S18]
 
 ### R11. Depth-2-And-Deeper DAG Dispatch
 
@@ -442,14 +454,15 @@ work. [S12, S17]
   Carroll. Follow-up: create a verification ticket before implementation
   tickets that depend on upstream spec facts. [S3, S4]
 - **Daemon wake comment and label fetch mechanics.** Verify the normalized
-  comment fetch shape for `id`, `createdAt`, and `updatedAt`, the narrow body
-  fetch needed to identify titled workpad comments when a new comment id
-  appears, `wake:*` label visibility, and blocking-relation visibility in the
-  normalized issue model. `Comment.updatedAt` itself is already verified on
-  project workpads; do not re-open that platform fact. Owner: daemon wake
-  verification follow-up under Jeremy Carroll. Follow-up: verify the Linear
+  comment fetch shape for `id` and `updatedAt`, the narrow body fetch needed to
+  identify titled workpad comments when a new comment id appears, `wake:*` label
+  visibility, and blocking-relation visibility in the normalized issue model.
+  `Comment.updatedAt` itself is already verified on project workpads; do not
+  re-open that platform fact. Comment `createdAt` is not a steady-state wake
+  input; the no-comment fallback anchor is the issue `created_at`. Owner: daemon
+  wake verification follow-up under Jeremy Carroll. Follow-up: verify the Linear
   fetch path before implementing wake eligibility or Linear binding. [S3, S4,
-  S6, S12]
+  S6, S12, S18]
 - **Maturity gate relation direction and label visibility.** Verify blocks
   versus blocked-by direction, labels on blocked or non-candidate tickets, and
   label-change visibility in snapshot deltas. This verification is scoped to
