@@ -168,25 +168,18 @@ defmodule SymphonyElixir.Linear.Client do
   @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
   def fetch_comment_body(comment_id) when is_binary(comment_id) do
     if Config.present_string?(Config.settings!().tracker.api_key) do
-      case graphql(@comment_body_query, %{commentId: comment_id}) do
-        {:ok, %{"data" => %{"comment" => %{"body" => body}}}} when is_binary(body) ->
-          {:ok, body}
-
-        {:ok, %{"data" => %{"comment" => nil}}} ->
-          {:error, :comment_not_found}
-
-        {:ok, %{"errors" => errors}} ->
-          {:error, {:linear_graphql_errors, errors}}
-
-        {:ok, _body} ->
-          {:error, :linear_unknown_payload}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
+      do_fetch_comment_body(comment_id, &graphql/2)
     else
       {:error, :missing_linear_api_token}
     end
+  end
+
+  @doc false
+  @spec fetch_comment_body_for_test(String.t(), (String.t(), map() -> {:ok, map()} | {:error, term()})) ::
+          {:ok, String.t()} | {:error, term()}
+  def fetch_comment_body_for_test(comment_id, graphql_fun)
+      when is_binary(comment_id) and is_function(graphql_fun, 2) do
+    do_fetch_comment_body(comment_id, graphql_fun)
   end
 
   @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -322,6 +315,25 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp poll_query({:project_slug, project_slug}), do: {@query_by_project, %{projectSlug: project_slug}}
   defp poll_query({:team_key, team_key}), do: {@query_by_team, %{teamKey: team_key}}
+
+  defp do_fetch_comment_body(comment_id, graphql_fun) when is_function(graphql_fun, 2) do
+    case graphql_fun.(@comment_body_query, %{commentId: comment_id}) do
+      {:ok, %{"data" => %{"comment" => %{"body" => body}}}} when is_binary(body) ->
+        {:ok, body}
+
+      {:ok, %{"data" => %{"comment" => nil}}} ->
+        {:error, :comment_not_found}
+
+      {:ok, %{"errors" => errors}} ->
+        {:error, {:linear_graphql_errors, errors}}
+
+      {:ok, _body} ->
+        {:error, :linear_unknown_payload}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   defp do_fetch_issue_states(ids, assignee_filter) do
     do_fetch_issue_states(ids, assignee_filter, &graphql/2)

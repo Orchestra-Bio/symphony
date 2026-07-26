@@ -140,36 +140,37 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
   end
 
   test "narrow comment body fetch requests body by comment id only" do
-    with_linear_graphql_stub(
-      %{
-        "data" => %{
-          "comment" => %{
-            "id" => "comment-1",
-            "body" => "## Codex Workpad\nwriter title lives here"
-          }
-        }
-      },
-      fn endpoint ->
-        write_workflow_file!(Workflow.workflow_file_path(), tracker_endpoint: endpoint)
+    graphql_fun = fn query, variables ->
+      send(self(), {:fetch_comment_body_request, query, variables})
 
-        assert {:ok, "## Codex Workpad\nwriter title lives here"} =
-                 Client.fetch_comment_body("comment-1")
-      end
-    )
+      {:ok,
+       %{
+         "data" => %{
+           "comment" => %{
+             "id" => "comment-1",
+             "body" => "## Codex Workpad\nwriter title lives here"
+           }
+         }
+       }}
+    end
 
-    assert_receive {:linear_graphql_request, %{"query" => query, "variables" => variables}}
+    assert {:ok, "## Codex Workpad\nwriter title lives here"} =
+             Client.fetch_comment_body_for_test("comment-1", graphql_fun)
+
+    assert_receive {:fetch_comment_body_request, query, variables}
     assert query =~ "comment(id: $commentId)"
     assert query =~ "body"
-    assert variables["commentId"] == "comment-1"
+    assert variables.commentId == "comment-1"
     refute query =~ "issues("
   end
 
   test "narrow comment body fetch reports missing comments" do
-    with_linear_graphql_stub(%{"data" => %{"comment" => nil}}, fn endpoint ->
-      write_workflow_file!(Workflow.workflow_file_path(), tracker_endpoint: endpoint)
+    graphql_fun = fn _query, _variables ->
+      {:ok, %{"data" => %{"comment" => nil}}}
+    end
 
-      assert {:error, :comment_not_found} = Client.fetch_comment_body("missing-comment")
-    end)
+    assert {:error, :comment_not_found} =
+             Client.fetch_comment_body_for_test("missing-comment", graphql_fun)
   end
 
   defp with_linear_graphql_stub(response_body, fun) when is_map(response_body) and is_function(fun, 1) do
