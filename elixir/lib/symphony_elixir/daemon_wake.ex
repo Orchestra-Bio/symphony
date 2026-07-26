@@ -61,6 +61,17 @@ defmodule SymphonyElixir.DaemonWake do
     end
   end
 
+  # Jitter is pseudorandom but fixed per daemon per sleep cycle, not drawn per call.
+  # Nothing stores next_wake_at, so a fresh random draw on each poll could move the
+  # due time back and forth. What we need is decorrelation: stable for one sleep,
+  # different across daemons, and reproducible after restart.
+  #
+  # The hash key uses only durable wake inputs: issue id, anchor id, cadence, and
+  # anchor timestamp. Including the anchor reshuffles the offset after each
+  # evaluation while keeping the current sleep's wake time explainable.
+  #
+  # The spread is intentionally coarse: five buckets over +/-60s. Per-state
+  # concurrency caps still bound a herd; jitter just thins the first wave.
   @spec deterministic_jitter_seconds(Issue.t(), String.t() | nil, String.t(), DateTime.t()) :: integer()
   def deterministic_jitter_seconds(%Issue{} = issue, anchor_id, cadence, %DateTime{} = anchor_at) do
     key =
