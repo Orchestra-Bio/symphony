@@ -1,6 +1,8 @@
 defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
   use SymphonyElixir.TestSupport
 
+  alias SymphonyElixir.Linear.Issue
+
   test "poll-shaped candidate fetch reads engine workpad anchor metadata and blocker labels" do
     raw_issue =
       raw_linear_issue(%{
@@ -74,7 +76,7 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
     # `body` appears in the filter expression; this only rejects a selected body field.
     refute query =~ ~r/\n\s+body\s*\n/
     assert variables["commentFirst"] == 1
-    assert variables["commentAnchorTitle"] == SymphonyElixir.Linear.Issue.workpad_title()
+    assert variables["commentAnchorTitle"] == Issue.workpad_title()
     assert variables["relationFirst"] == 50
   end
 
@@ -126,7 +128,7 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
                       commentAnchorTitle: comment_anchor_title
                     }}
 
-    assert comment_anchor_title == SymphonyElixir.Linear.Issue.workpad_title()
+    assert comment_anchor_title == Issue.workpad_title()
 
     assert query =~ "SymphonyLinearIssuesById"
 
