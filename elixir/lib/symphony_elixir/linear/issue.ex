@@ -28,9 +28,11 @@ defmodule SymphonyElixir.Linear.Issue do
           optional(:labels) => [String.t()]
         }
 
+  # Linear has no "last evaluated" field, so daemon workpads use the
+  # server-written updatedAt of titled comments as the last-run clock. Comments
+  # anchor timer wakes; they never trigger daemon wake decisions.
   @type comment_ref :: %{
           id: String.t() | nil,
-          created_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
 
@@ -71,7 +73,6 @@ defmodule SymphonyElixir.Linear.Issue do
   def normalize_comment_ref(%{} = comment) do
     %{
       id: map_value(comment, :id, "id"),
-      created_at: parse_datetime(map_value(comment, :created_at, "createdAt")),
       updated_at: parse_datetime(map_value(comment, :updated_at, "updatedAt"))
     }
   end

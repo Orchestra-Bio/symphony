@@ -46,7 +46,7 @@ defmodule SymphonyElixir.DaemonMaturityIssueTest do
            }
   end
 
-  test "comment refs normalize bounded metadata without bodies" do
+  test "workpad edited in place: updated_at is the last-run anchor, created_at is not" do
     comment =
       Issue.normalize_comment_ref(%{
         "id" => "comment-1",
@@ -56,8 +56,8 @@ defmodule SymphonyElixir.DaemonMaturityIssueTest do
       })
 
     assert comment.id == "comment-1"
-    assert comment.created_at == ~U[2026-07-25 16:37:19.692Z]
     assert comment.updated_at == ~U[2026-07-25 17:35:21.968Z]
+    refute Map.has_key?(comment, :created_at)
     refute Map.has_key?(comment, :body)
   end
 end
