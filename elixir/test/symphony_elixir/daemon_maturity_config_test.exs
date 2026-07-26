@@ -16,14 +16,14 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert config.tracker.daemon_states == []
     assert config.tracker.daemon_dispatch_states == []
     assert config.tracker.daemon_default_wake == "1h"
-    assert config.tracker.maturity_labels == ["mature"]
+    assert config.tracker.maturity_labels == []
     assert config.tracker.maturity_gate_state_scope == ["todo"]
 
     assert Config.daemon_state_set() == MapSet.new()
     assert Config.daemon_dispatch_state_set() == MapSet.new()
     assert Config.daemon_dispatch_target_state() == nil
     assert Config.daemon_default_wake() == "1h"
-    assert Config.maturity_label_set() == MapSet.new(["mature"])
+    assert Config.maturity_label_set() == MapSet.new()
     assert Config.maturity_gate_state_scope_set() == MapSet.new(["todo"])
     assert Config.max_concurrent_agents_for_state("Todo") == 10
   end

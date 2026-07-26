@@ -62,7 +62,7 @@ defmodule SymphonyElixir.Config.Schema do
       field(:daemon_states, {:array, :string}, default: [])
       field(:daemon_dispatch_states, {:array, :string}, default: [])
       field(:daemon_default_wake, :string, default: "1h")
-      field(:maturity_labels, {:array, :string}, default: ["mature"])
+      field(:maturity_labels, {:array, :string}, default: [])
       field(:maturity_gate_state_scope, {:array, :string}, default: ["todo"])
     end
 
