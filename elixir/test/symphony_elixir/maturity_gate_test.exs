@@ -40,6 +40,16 @@ defmodule SymphonyElixir.MaturityGateTest do
              MaturityGate.evaluate(issue(state: "In Progress", blocked_by: [mature_blocker]), widened_config)
   end
 
+  test "empty scope leaves issues ungated even when blockers are non-terminal" do
+    immature_blocker = blocker(id: "blocker-review", state: "In Review")
+
+    assert %MaturityGate{status: :eligible, blockers: [], warnings: []} =
+             MaturityGate.evaluate(
+               issue(state: "Todo", blocked_by: [immature_blocker]),
+               config(maturity_gate_state_scope: [])
+             )
+  end
+
   test "mature direct blockers open depth two and compose in depth three without transitive checks" do
     config = config()
 

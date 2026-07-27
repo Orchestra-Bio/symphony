@@ -77,6 +77,8 @@ defmodule SymphonyElixir.MaturityGate do
   end
 
   defp issue_in_scope?(%Issue{state: state}, config) do
+    # Out-of-scope issues are ungated; removing "todo" also removes the
+    # upstream terminal-only blocker gate for Todo issues.
     scope = normalized_values(Map.get(config, :maturity_gate_state_scope, []))
     normalize_string(state) in scope
   end
