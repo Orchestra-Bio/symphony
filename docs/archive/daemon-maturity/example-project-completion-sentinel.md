@@ -27,7 +27,9 @@ outside the active candidate set.
 A conservative project predicate is:
 
 - every daemon ticket in the project is in the configured satisfied daemon
-  resting state, normally `Happy`;
+  resting state, normally `Happy`, and its `## Symphony Workpad` has a
+  `Last run` timestamp within the daemon cadence plus the project's accepted
+  slack;
 - every non-daemon ticket is in an accepted terminal state, normally `Done` or
   `Canceled`;
 - no daemon ticket remains in a configured daemon dispatch state.
@@ -35,6 +37,11 @@ A conservative project predicate is:
 If the project treats `Duplicate` as terminal, record that explicitly in the
 sentinel verdict. Do not let the sentinel infer project policy from a Linear
 state name alone.
+
+The freshness check is part of the verdict, not just wake scheduling. A daemon
+that last reported `Happy` and then stopped running can otherwise authorize
+project closure forever. Apply the same timestamp check when one daemon trusts
+another daemon's verdict.
 
 ## Evaluation Loop
 
