@@ -85,6 +85,28 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
 
     write_daemon_workflow!(%{
       "active_states" => ["Todo", "Evaluating"],
+      "terminal_states" => ["Done", "Happy"],
+      "daemon_states" => ["Happy"],
+      "daemon_dispatch_states" => ["Evaluating"]
+    })
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "tracker.daemon_states"
+    assert message =~ "must be disjoint from tracker.terminal_states"
+
+    write_daemon_workflow!(%{
+      "active_states" => ["Todo", "Happy"],
+      "terminal_states" => ["Done"],
+      "daemon_states" => ["Happy"],
+      "daemon_dispatch_states" => ["Happy"]
+    })
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "tracker.daemon_dispatch_states"
+    assert message =~ "must be disjoint from tracker.daemon_states"
+
+    write_daemon_workflow!(%{
+      "active_states" => ["Todo", "Evaluating", "Done"],
       "terminal_states" => ["Done"],
       "daemon_states" => ["Happy"],
       "daemon_dispatch_states" => ["Done"]
@@ -93,6 +115,43 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
     assert message =~ "tracker.daemon_dispatch_states"
     assert message =~ "must be disjoint from tracker.terminal_states"
+  end
+
+  test "maturity string set config rejects blank entries by field" do
+    write_daemon_workflow!(%{"maturity_labels" => ["mature", " "]})
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "tracker.maturity_labels"
+    assert message =~ "entries must not be blank"
+
+    write_daemon_workflow!(%{"maturity_gate_state_scope" => ["todo", ""]})
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "tracker.maturity_gate_state_scope"
+    assert message =~ "entries must not be blank"
+  end
+
+  test "schema fallback clauses keep optional config values non-fatal" do
+    alias SymphonyElixir.Config.Schema
+
+    changeset = Ecto.Changeset.change(%Schema.Tracker{})
+
+    assert Schema.reject_config_fields(changeset, nil, ["daemon_label"]) == changeset
+    assert Schema.normalize_string_set(nil) == []
+    assert Schema.normalize_string_set([:Todo, " In Progress ", :Todo]) == ["todo", "in progress"]
+
+    tracker =
+      Schema.Tracker.changeset(
+        %Schema.Tracker{
+          active_states: nil,
+          terminal_states: nil,
+          daemon_states: nil,
+          daemon_dispatch_states: nil
+        },
+        %{}
+      )
+
+    assert tracker.valid?
   end
 
   test "daemon default wake accepts only supported normalized durations" do
