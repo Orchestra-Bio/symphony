@@ -46,8 +46,8 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
 
     leased = %{daemon | state: "Evaluating"}
 
-    assert {:ok, [^leased]} =
-             Orchestrator.append_due_daemon_candidates_for_test(
+    assert {:ok, [^leased], updated_state} =
+             Orchestrator.append_due_daemon_candidates_with_state_for_test(
                [],
                state(),
                ~U[2026-07-26 10:02:00Z],
@@ -60,6 +60,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
              )
 
     assert_receive {:leased, "daemon-due", "Evaluating"}
+    assert updated_state.daemon_lease_states == %{"daemon-due" => "Unhappy"}
   end
 
   test "daemon sleep candidates create missing workpad anchors before wake evaluation" do

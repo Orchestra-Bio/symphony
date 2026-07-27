@@ -47,7 +47,7 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, _state}, 50
   end
 
-  test "finite daemon retry exhaustion parks to Unhappy without authoring a park comment" do
+  test "finite daemon retry exhaustion restores the pre-lease state without authoring a park comment" do
     issue_id = "daemon-exhausted"
     ref = make_ref()
     orchestrator_name = Module.concat(__MODULE__, :DaemonExhaustionOrchestrator)
@@ -65,7 +65,7 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     :sys.replace_state(pid, fn state ->
       %{
         state
-        | running: %{issue_id => running_entry(running_issue, ref, retry_attempt: 3)},
+        | running: %{issue_id => running_entry(running_issue, ref, retry_attempt: 3, daemon_pre_lease_state: "Happy")},
           claimed: MapSet.new([issue_id]),
           retry_attempts: %{}
       }
@@ -75,32 +75,30 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
 
     assert_receive {:memory_tracker_comment_update, "workpad-exhausted", body}, 1_000
     assert String.starts_with?(body, "## Symphony Workpad\nLast run ")
-    assert_receive {:memory_tracker_state_update, ^issue_id, "Unhappy"}, 1_000
+    assert_receive {:memory_tracker_state_update, ^issue_id, "Happy"}, 1_000
     refute_receive {:memory_tracker_comment, ^issue_id, _body}, 50
 
     state = :sys.get_state(pid)
     refute Map.has_key?(state.retry_attempts, issue_id)
     refute MapSet.member?(state.claimed, issue_id)
 
-    assert :ok = Tracker.update_issue_state(issue_id, "Happy")
-    assert_receive {:memory_tracker_state_update, ^issue_id, "Happy"}
+    assert :ok = Tracker.update_issue_state(issue_id, "Unhappy")
+    assert_receive {:memory_tracker_state_update, ^issue_id, "Unhappy"}
   end
 
-  test "daemon exhaustion retries instead of parking when Unhappy is not configured" do
-    write_daemon_workflow_without_unhappy!()
-
-    issue_id = "daemon-missing-unhappy"
+  test "daemon exhaustion without known pre-lease state leaves dispatch state without guessing" do
+    issue_id = "daemon-unknown-pre-lease"
     ref = make_ref()
-    orchestrator_name = Module.concat(__MODULE__, :DaemonMissingUnhappyOrchestrator)
+    orchestrator_name = Module.concat(__MODULE__, :DaemonUnknownPreLeaseOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
     stop_on_exit(pid)
 
     running_issue =
       issue(%{
         id: issue_id,
-        identifier: "ABC-288-MISSING-UNHAPPY",
+        identifier: "ABC-288-UNKNOWN-PRE-LEASE",
         state: "Evaluating",
-        comments: [comment("workpad-missing-unhappy", ~U[2026-07-26 15:00:00Z])]
+        comments: [comment("workpad-unknown-pre-lease", ~U[2026-07-26 15:00:00Z])]
       })
 
     :sys.replace_state(pid, fn state ->
@@ -116,20 +114,18 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :boom})
 
-        assert_receive {:memory_tracker_comment_update, "workpad-missing-unhappy", body}, 1_000
+        assert_receive {:memory_tracker_comment_update, "workpad-unknown-pre-lease", body}, 1_000
         assert String.starts_with?(body, "## Symphony Workpad\nLast run ")
 
         Process.sleep(50)
       end)
 
-    assert log =~ "tracker.daemon_states must include \"unhappy\""
+    assert log =~ "no pre-lease state is known"
     refute_receive {:memory_tracker_state_update, ^issue_id, _state}, 50
 
-    assert %{
-             attempt: 4,
-             identifier: "ABC-288-MISSING-UNHAPPY",
-             error: "missing daemon unhappy state configuration"
-           } = :sys.get_state(pid).retry_attempts[issue_id]
+    state = :sys.get_state(pid)
+    refute Map.has_key?(state.retry_attempts, issue_id)
+    assert MapSet.member?(state.claimed, issue_id)
   end
 
   test "normal tickets keep retrying after the daemon exhaustion boundary" do
@@ -188,29 +184,6 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     WorkflowStore.force_reload()
   end
 
-  defp write_daemon_workflow_without_unhappy! do
-    workflow = """
-    ---
-    tracker:
-      kind: memory
-      active_states: ["Todo", "Evaluating", "Legacy Evaluating"]
-      terminal_states: ["Done", "Canceled"]
-      daemon_states: ["Happy"]
-      daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]
-      daemon_default_wake: "1h"
-    agent:
-      max_concurrent_agents: 3
-      max_concurrent_agents_by_state: {"evaluating": 2, "legacy evaluating": 2}
-    polling:
-      interval_ms: 60000
-    ---
-    You are an agent for this repository.
-    """
-
-    File.write!(Workflow.workflow_file_path(), workflow)
-    WorkflowStore.force_reload()
-  end
-
   defp issue(attrs) do
     defaults = %{
       id: "issue-1",
@@ -243,7 +216,8 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
       last_codex_timestamp: nil,
       last_codex_event: nil,
       started_at: DateTime.utc_now(),
-      retry_attempt: Keyword.fetch!(opts, :retry_attempt)
+      retry_attempt: Keyword.fetch!(opts, :retry_attempt),
+      daemon_pre_lease_state: Keyword.get(opts, :daemon_pre_lease_state)
     }
   end
 
