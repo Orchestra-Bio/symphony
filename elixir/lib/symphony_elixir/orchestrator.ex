@@ -7,11 +7,12 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, SymphonyWorkpad, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, DaemonWake, StatusDashboard, SymphonyWorkpad, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
+  @daemon_max_retry_attempts 3
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_codex_totals %{
@@ -246,13 +247,19 @@ defmodule SymphonyElixir.Orchestrator do
 
     next_attempt = next_retry_attempt_from_running(running_entry)
 
-    schedule_issue_retry(state, issue_id, next_attempt, %{
+    retry_metadata = %{
       identifier: running_entry.identifier,
       issue_url: running_entry.issue.url,
       error: "agent exited: #{inspect(reason)}",
       worker_host: Map.get(running_entry, :worker_host),
       workspace_path: Map.get(running_entry, :workspace_path)
-    })
+    }
+
+    if daemon_retry_exhausted?(Map.get(running_entry, :issue), next_attempt) do
+      park_exhausted_daemon(state, issue_id, running_entry, retry_metadata)
+    else
+      schedule_issue_retry(state, issue_id, next_attempt, retry_metadata)
+    end
   end
 
   defp maybe_dispatch(%State{} = state) do
@@ -264,6 +271,7 @@ defmodule SymphonyElixir.Orchestrator do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          issues <- ensure_candidate_workpads(issues),
+         {:ok, issues} <- append_due_daemon_candidates(issues, state),
          true <- available_slots(state) > 0 do
       choose_issues(issues, state)
     else
@@ -408,6 +416,14 @@ defmodule SymphonyElixir.Orchestrator do
   @spec sort_issues_for_dispatch_for_test([Issue.t()]) :: [Issue.t()]
   def sort_issues_for_dispatch_for_test(issues) when is_list(issues) do
     sort_issues_for_dispatch(issues)
+  end
+
+  @doc false
+  @spec append_due_daemon_candidates_for_test([Issue.t()], term(), DateTime.t(), keyword()) ::
+          {:ok, [Issue.t()]} | {:error, term()}
+  def append_due_daemon_candidates_for_test(issues, %State{} = state, %DateTime{} = now, opts)
+      when is_list(issues) and is_list(opts) do
+    append_due_daemon_candidates(issues, state, now, opts)
   end
 
   @doc false
@@ -904,6 +920,126 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp todo_issue_blocked_by_non_terminal?(_issue, _terminal_states), do: false
 
+  defp append_due_daemon_candidates(issues, %State{} = state) when is_list(issues) do
+    append_due_daemon_candidates(issues, state, DateTime.utc_now(), [])
+  end
+
+  defp append_due_daemon_candidates(issues, %State{} = state, %DateTime{} = now, opts)
+       when is_list(issues) and is_list(opts) do
+    cond do
+      Config.settings!().tracker.daemon_states == [] ->
+        {:ok, issues}
+
+      available_slots(state) <= 0 ->
+        {:ok, issues}
+
+      true ->
+        with {:ok, daemon_issues} <- fetch_daemon_sleep_candidates(opts) do
+          {:ok, issues ++ lease_due_daemon_candidates(daemon_issues, state, now, opts)}
+        end
+    end
+  end
+
+  defp fetch_daemon_sleep_candidates(opts) do
+    fetch_fun = Keyword.get(opts, :fetch_issues_by_states, &Tracker.fetch_issues_by_states/1)
+    fetch_fun.(Config.settings!().tracker.daemon_states)
+  end
+
+  defp lease_due_daemon_candidates(issues, %State{} = state, %DateTime{} = now, opts)
+       when is_list(issues) and is_list(opts) do
+    config = daemon_wake_config()
+
+    issues
+    |> Enum.flat_map(fn
+      %Issue{} = issue -> lease_due_daemon_candidate(issue, state, now, config, opts)
+      _issue -> []
+    end)
+  end
+
+  defp lease_due_daemon_candidate(%Issue{} = issue, %State{} = state, %DateTime{} = now, config, opts) do
+    case DaemonWake.evaluate(issue, now, config) do
+      %DaemonWake{status: :due} ->
+        issue
+        |> maybe_lease_daemon(state, opts)
+        |> List.wrap()
+
+      %DaemonWake{status: :invalid, warnings: warnings} ->
+        Logger.warning("Skipping daemon wake for #{issue_context(issue)} warnings=#{inspect(warnings)}")
+        []
+
+      %DaemonWake{} ->
+        []
+    end
+  end
+
+  defp maybe_lease_daemon(%Issue{} = issue, %State{} = state, opts) do
+    with target_state when is_binary(target_state) <- daemon_dispatch_target_state_name(),
+         leased_issue = %Issue{issue | state: target_state},
+         true <- dispatch_slots_available?(leased_issue, state),
+         true <- worker_slots_available?(state),
+         :ok <- update_issue_state(opts, issue.id, target_state),
+         {:ok, [refetched_issue | _]} <- fetch_issue_states_by_ids(opts, [issue.id]),
+         %Issue{} = leased_issue <- refetched_issue do
+      Logger.info("Leased due daemon for dispatch: #{issue_context(issue)} state=#{target_state}")
+      leased_issue
+    else
+      nil ->
+        nil
+
+      false ->
+        nil
+
+      {:ok, []} ->
+        Logger.info("Skipping leased daemon; issue no longer visible after state write: #{issue_context(issue)}")
+        nil
+
+      {:error, reason} ->
+        Logger.warning("Skipping daemon lease for #{issue_context(issue)}: #{inspect(reason)}")
+        nil
+
+      other ->
+        Logger.warning("Skipping daemon lease for #{issue_context(issue)}: #{inspect(other)}")
+        nil
+    end
+  end
+
+  defp update_issue_state(opts, issue_id, state_name) do
+    update_fun = Keyword.get(opts, :update_issue_state, &Tracker.update_issue_state/2)
+    update_fun.(issue_id, state_name)
+  end
+
+  defp fetch_issue_states_by_ids(opts, issue_ids) do
+    fetch_fun = Keyword.get(opts, :fetch_issue_states_by_ids, &Tracker.fetch_issue_states_by_ids/1)
+    fetch_fun.(issue_ids)
+  end
+
+  defp daemon_wake_config do
+    tracker = Config.settings!().tracker
+
+    %{
+      daemon_states: tracker.daemon_states,
+      daemon_dispatch_states: tracker.daemon_dispatch_states,
+      terminal_states: tracker.terminal_states,
+      daemon_default_wake: tracker.daemon_default_wake
+    }
+  end
+
+  defp daemon_dispatch_target_state_name do
+    case Config.daemon_dispatch_target_state() do
+      target_state when is_binary(target_state) and target_state != "" ->
+        configured_state_name(Config.settings!().tracker.active_states, target_state) || target_state
+
+      _ ->
+        nil
+    end
+  end
+
+  defp configured_state_name(state_names, normalized_state) when is_list(state_names) do
+    Enum.find(state_names, &(normalize_issue_state(&1) == normalized_state))
+  end
+
+  defp configured_state_name(_state_names, _normalized_state), do: nil
+
   defp terminal_issue_state?(state_name, terminal_states) when is_binary(state_name) do
     MapSet.member?(terminal_states, normalize_issue_state(state_name))
   end
@@ -1221,6 +1357,38 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
+  defp daemon_retry_exhausted?(%Issue{} = issue, next_attempt)
+       when is_integer(next_attempt) and next_attempt > @daemon_max_retry_attempts do
+    daemon_dispatch_issue?(issue)
+  end
+
+  defp daemon_retry_exhausted?(_issue, _next_attempt), do: false
+
+  defp daemon_dispatch_issue?(%Issue{state: state_name}) when is_binary(state_name) do
+    MapSet.member?(Config.daemon_dispatch_state_set(), normalize_issue_state(state_name))
+  end
+
+  defp daemon_dispatch_issue?(_issue), do: false
+
+  defp park_exhausted_daemon(%State{} = state, issue_id, running_entry, retry_metadata) do
+    issue = Map.get(running_entry, :issue)
+    target_state = daemon_unhappy_state_name()
+
+    case update_issue_state([], issue_id, target_state) do
+      :ok ->
+        Logger.warning("Daemon retry exhausted for issue_id=#{issue_id} issue_identifier=#{Map.get(running_entry, :identifier)}; parked state=#{target_state}")
+        release_issue_claim(state, issue_id)
+
+      {:error, reason} ->
+        Logger.warning("Failed to park exhausted daemon #{issue_context(issue)} state=#{target_state}: #{inspect(reason)}; retrying")
+        schedule_issue_retry(state, issue_id, @daemon_max_retry_attempts + 1, retry_metadata)
+    end
+  end
+
+  defp daemon_unhappy_state_name do
+    if MapSet.member?(Config.daemon_state_set(), "unhappy"), do: "Unhappy", else: "unhappy"
+  end
+
   defp ensure_candidate_workpads(issues) when is_list(issues) do
     issues
     |> Enum.reduce([], fn
@@ -1236,8 +1404,6 @@ defmodule SymphonyElixir.Orchestrator do
     end)
     |> Enum.reverse()
   end
-
-  defp ensure_candidate_workpads(issues), do: issues
 
   defp create_missing_workpad_anchor(%Issue{} = issue) do
     case SymphonyWorkpad.ensure_created(issue) do
@@ -1413,6 +1579,8 @@ defmodule SymphonyElixir.Orchestrator do
   defp issue_context(%Issue{id: issue_id, identifier: identifier}) do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
   end
+
+  defp issue_context(_issue), do: "issue_id=n/a issue_identifier=n/a"
 
   defp available_slots(%State{} = state) do
     max(
