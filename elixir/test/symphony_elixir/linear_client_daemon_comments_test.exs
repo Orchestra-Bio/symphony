@@ -175,6 +175,51 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
              Client.fetch_comment_body_for_test("missing-comment", graphql_fun)
   end
 
+  test "narrow issue history fetch requests state transitions only" do
+    graphql_fun = fn query, variables ->
+      send(self(), {:fetch_issue_history_request, query, variables})
+
+      {:ok,
+       %{
+         "data" => %{
+           "issue" => %{
+             "history" => %{
+               "nodes" => [
+                 %{
+                   "createdAt" => "2026-07-27T01:29:03.000Z",
+                   "fromState" => %{"name" => "Human Input Needed"},
+                   "toState" => %{"name" => "Rework"}
+                 },
+                 %{
+                   "createdAt" => "2026-07-27T00:40:33.000Z",
+                   "fromState" => %{"name" => "Happy"},
+                   "toState" => %{"name" => "Evaluating"}
+                 }
+               ]
+             }
+           }
+         }
+       }}
+    end
+
+    assert {:ok,
+            [
+              %{
+                created_at: ~U[2026-07-27 01:29:03.000Z],
+                from_state: "Human Input Needed",
+                to_state: "Rework"
+              },
+              %{created_at: ~U[2026-07-27 00:40:33.000Z], from_state: "Happy", to_state: "Evaluating"}
+            ]} = Client.fetch_issue_state_history_for_test("issue-1", 6, graphql_fun)
+
+    assert_receive {:fetch_issue_history_request, query, %{issueId: "issue-1", first: 6}}
+    assert query =~ "issue(id: $issueId)"
+    assert query =~ "history(first: $first)"
+    assert query =~ "fromState"
+    assert query =~ "toState"
+    refute query =~ "comments("
+  end
+
   defp with_linear_graphql_stub(response_body, fun) when is_map(response_body) and is_function(fun, 1) do
     parent = self()
 

@@ -47,12 +47,20 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     refute_receive {:memory_tracker_state_update, ^issue_id, _state}, 50
   end
 
-  test "finite daemon retry exhaustion restores the pre-lease state without authoring a park comment" do
+  test "finite daemon retry exhaustion restores the state named by issue history" do
     issue_id = "daemon-exhausted"
     ref = make_ref()
     orchestrator_name = Module.concat(__MODULE__, :DaemonExhaustionOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
     stop_on_exit(pid)
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issue_history, %{
+      issue_id => [
+        %{created_at: ~U[2026-07-26 15:03:00Z], from_state: "Human Input Needed", to_state: "Rework"},
+        %{created_at: ~U[2026-07-26 15:02:00Z], from_state: "Happy", to_state: "Legacy Evaluating"},
+        %{created_at: ~U[2026-07-26 15:01:00Z], from_state: "Unhappy", to_state: "Evaluating"}
+      ]
+    })
 
     running_issue =
       issue(%{
@@ -65,7 +73,7 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     :sys.replace_state(pid, fn state ->
       %{
         state
-        | running: %{issue_id => running_entry(running_issue, ref, retry_attempt: 3, daemon_pre_lease_state: "Happy")},
+        | running: %{issue_id => running_entry(running_issue, ref, retry_attempt: 3)},
           claimed: MapSet.new([issue_id]),
           retry_attempts: %{}
       }
@@ -86,19 +94,25 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     assert_receive {:memory_tracker_state_update, ^issue_id, "Unhappy"}
   end
 
-  test "daemon exhaustion without known pre-lease state leaves dispatch state without guessing" do
-    issue_id = "daemon-unknown-pre-lease"
+  test "daemon exhaustion without a lease transition leaves dispatch state without guessing" do
+    issue_id = "daemon-missing-history"
     ref = make_ref()
     orchestrator_name = Module.concat(__MODULE__, :DaemonUnknownPreLeaseOrchestrator)
     {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
     stop_on_exit(pid)
 
+    Application.put_env(:symphony_elixir, :memory_tracker_issue_history, %{
+      issue_id => [
+        %{created_at: ~U[2026-07-26 15:02:00Z], from_state: "Human Input Needed", to_state: "Rework"}
+      ]
+    })
+
     running_issue =
       issue(%{
         id: issue_id,
-        identifier: "ABC-288-UNKNOWN-PRE-LEASE",
+        identifier: "ABC-288-MISSING-HISTORY",
         state: "Evaluating",
-        comments: [comment("workpad-unknown-pre-lease", ~U[2026-07-26 15:00:00Z])]
+        comments: [comment("workpad-missing-history", ~U[2026-07-26 15:00:00Z])]
       })
 
     :sys.replace_state(pid, fn state ->
@@ -114,13 +128,13 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
       capture_log(fn ->
         send(pid, {:DOWN, ref, :process, self(), :boom})
 
-        assert_receive {:memory_tracker_comment_update, "workpad-unknown-pre-lease", body}, 1_000
+        assert_receive {:memory_tracker_comment_update, "workpad-missing-history", body}, 1_000
         assert String.starts_with?(body, "## Symphony Workpad\nLast run ")
 
         Process.sleep(50)
       end)
 
-    assert log =~ "no pre-lease state is known"
+    assert log =~ "no matching lease transition"
     refute_receive {:memory_tracker_state_update, ^issue_id, _state}, 50
 
     state = :sys.get_state(pid)
@@ -216,8 +230,7 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
       last_codex_timestamp: nil,
       last_codex_event: nil,
       started_at: DateTime.utc_now(),
-      retry_attempt: Keyword.fetch!(opts, :retry_attempt),
-      daemon_pre_lease_state: Keyword.get(opts, :daemon_pre_lease_state)
+      retry_attempt: Keyword.fetch!(opts, :retry_attempt)
     }
   end
 

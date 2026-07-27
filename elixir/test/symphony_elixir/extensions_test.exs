@@ -25,6 +25,11 @@ defmodule SymphonyElixir.ExtensionsTest do
       {:ok, issue_ids}
     end
 
+    def fetch_issue_state_history(issue_id, limit) do
+      send(self(), {:fetch_issue_state_history_called, issue_id, limit})
+      {:ok, [%{from_state: "Happy", to_state: "Evaluating"}]}
+    end
+
     def fetch_comment_body(comment_id) do
       send(self(), {:fetch_comment_body_called, comment_id})
       {:ok, "body for #{comment_id}"}
@@ -227,6 +232,14 @@ defmodule SymphonyElixir.ExtensionsTest do
     issue = %Issue{id: "issue-1", identifier: "MT-1", state: "In Progress"}
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue, %{id: "ignored"}])
     Application.put_env(:symphony_elixir, :memory_tracker_comment_bodies, %{"comment-1" => "## Codex Workpad"})
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issue_history, %{
+      "issue-1" => [
+        %{created_at: ~U[2026-07-27 00:40:33Z], from_state: "Happy", to_state: "Evaluating"},
+        %{created_at: ~U[2026-07-27 00:39:33Z], from_state: "Unhappy", to_state: "Evaluating"}
+      ]
+    })
+
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
 
@@ -235,6 +248,10 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_candidate_issues()
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issues_by_states([" in progress ", 42])
     assert {:ok, [^issue]} = SymphonyElixir.Tracker.fetch_issue_states_by_ids(["issue-1"])
+
+    assert {:ok, [%{from_state: "Happy", to_state: "Evaluating"}]} =
+             SymphonyElixir.Tracker.fetch_issue_state_history("issue-1", 1)
+
     assert {:ok, "## Codex Workpad"} = SymphonyElixir.Tracker.fetch_comment_body("comment-1")
     assert :ok = SymphonyElixir.Tracker.create_comment("issue-1", "comment")
     assert :ok = SymphonyElixir.Tracker.update_comment("comment-1", "updated")
@@ -264,6 +281,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert {:ok, ["issue-1"]} = Adapter.fetch_issue_states_by_ids(["issue-1"])
     assert_receive {:fetch_issue_states_by_ids_called, ["issue-1"]}
+
+    assert {:ok, [%{from_state: "Happy", to_state: "Evaluating"}]} =
+             Adapter.fetch_issue_state_history("issue-1", 6)
+
+    assert_receive {:fetch_issue_state_history_called, "issue-1", 6}
 
     assert {:ok, "body for comment-1"} = Adapter.fetch_comment_body("comment-1")
     assert_receive {:fetch_comment_body_called, "comment-1"}

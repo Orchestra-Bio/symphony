@@ -35,6 +35,17 @@ defmodule SymphonyElixir.Tracker.Memory do
      end)}
   end
 
+  @spec fetch_issue_state_history(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_issue_state_history(issue_id, limit) when is_binary(issue_id) and is_integer(limit) and limit > 0 do
+    history =
+      configured_issue_history()
+      |> Map.get(issue_id, [])
+      |> Enum.filter(&is_map/1)
+      |> Enum.take(limit)
+
+    {:ok, history}
+  end
+
   @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
   def fetch_comment_body(comment_id) when is_binary(comment_id) do
     case Map.fetch(configured_comment_bodies(), comment_id) do
@@ -67,6 +78,10 @@ defmodule SymphonyElixir.Tracker.Memory do
 
   defp configured_comment_bodies do
     Application.get_env(:symphony_elixir, :memory_tracker_comment_bodies, %{})
+  end
+
+  defp configured_issue_history do
+    Application.get_env(:symphony_elixir, :memory_tracker_issue_history, %{})
   end
 
   defp issue_entries do

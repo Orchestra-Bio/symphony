@@ -60,7 +60,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
              )
 
     assert_receive {:leased, "daemon-due", "Evaluating"}
-    assert updated_state.daemon_lease_states == %{"daemon-due" => "Unhappy"}
+    assert updated_state.running == %{}
   end
 
   test "daemon sleep candidates create missing workpad anchors before wake evaluation" do

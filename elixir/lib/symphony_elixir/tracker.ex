@@ -8,6 +8,7 @@ defmodule SymphonyElixir.Tracker do
   @callback fetch_candidate_issues() :: {:ok, [term()]} | {:error, term()}
   @callback fetch_issues_by_states([String.t()]) :: {:ok, [term()]} | {:error, term()}
   @callback fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
+  @callback fetch_issue_state_history(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
   @doc """
   Fetches a comment body by id for audit-trail reads outside daemon wake polling.
   """
@@ -29,6 +30,11 @@ defmodule SymphonyElixir.Tracker do
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
   def fetch_issue_states_by_ids(issue_ids) do
     adapter().fetch_issue_states_by_ids(issue_ids)
+  end
+
+  @spec fetch_issue_state_history(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_issue_state_history(issue_id, limit) do
+    adapter().fetch_issue_state_history(issue_id, limit)
   end
 
   @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
