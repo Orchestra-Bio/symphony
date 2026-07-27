@@ -58,6 +58,9 @@ defmodule SymphonyElixir.Linear.Adapter do
   @spec fetch_issue_states_by_ids([String.t()]) :: {:ok, [term()]} | {:error, term()}
   def fetch_issue_states_by_ids(issue_ids), do: client_module().fetch_issue_states_by_ids(issue_ids)
 
+  @spec fetch_issue_state_history(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_issue_state_history(issue_id, limit), do: client_module().fetch_issue_state_history(issue_id, limit)
+
   @spec fetch_comment_body(String.t()) :: {:ok, String.t()} | {:error, term()}
   def fetch_comment_body(comment_id), do: client_module().fetch_comment_body(comment_id)
 

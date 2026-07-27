@@ -110,6 +110,24 @@ defmodule SymphonyElixir.Linear.Client do
   }
   """
 
+  @issue_state_history_query """
+  query SymphonyLinearIssueStateHistory($issueId: String!, $first: Int!) {
+    issue(id: $issueId) {
+      history(first: $first) {
+        nodes {
+          createdAt
+          fromState {
+            name
+          }
+          toState {
+            name
+          }
+        }
+      }
+    }
+  }
+  """
+
   @spec fetch_candidate_issues() :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_candidate_issues do
     tracker = Config.settings!().tracker
@@ -160,6 +178,19 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   @doc """
+  Fetches recent issue state transitions for cold-path daemon retry recovery.
+  """
+  @spec fetch_issue_state_history(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
+  def fetch_issue_state_history(issue_id, limit)
+      when is_binary(issue_id) and is_integer(limit) and limit > 0 do
+    if Config.present_string?(Config.settings!().tracker.api_key) do
+      do_fetch_issue_state_history(issue_id, limit, &graphql/2)
+    else
+      {:error, :missing_linear_api_token}
+    end
+  end
+
+  @doc """
   Fetches a comment body by id for out-of-band workpad audit reads.
 
   Daemon wake polling filters the titled workpad anchor server-side and stays on
@@ -180,6 +211,17 @@ defmodule SymphonyElixir.Linear.Client do
   def fetch_comment_body_for_test(comment_id, graphql_fun)
       when is_binary(comment_id) and is_function(graphql_fun, 2) do
     do_fetch_comment_body(comment_id, graphql_fun)
+  end
+
+  @doc false
+  @spec fetch_issue_state_history_for_test(
+          String.t(),
+          pos_integer(),
+          (String.t(), map() -> {:ok, map()} | {:error, term()})
+        ) :: {:ok, [map()]} | {:error, term()}
+  def fetch_issue_state_history_for_test(issue_id, limit, graphql_fun)
+      when is_binary(issue_id) and is_integer(limit) and limit > 0 and is_function(graphql_fun, 2) do
+    do_fetch_issue_state_history(issue_id, limit, graphql_fun)
   end
 
   @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -323,6 +365,25 @@ defmodule SymphonyElixir.Linear.Client do
 
       {:ok, %{"data" => %{"comment" => nil}}} ->
         {:error, :comment_not_found}
+
+      {:ok, %{"errors" => errors}} ->
+        {:error, {:linear_graphql_errors, errors}}
+
+      {:ok, _body} ->
+        {:error, :linear_unknown_payload}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp do_fetch_issue_state_history(issue_id, limit, graphql_fun) when is_function(graphql_fun, 2) do
+    case graphql_fun.(@issue_state_history_query, %{issueId: issue_id, first: limit}) do
+      {:ok, %{"data" => %{"issue" => %{"history" => %{"nodes" => nodes}}}}} when is_list(nodes) ->
+        {:ok, Enum.map(nodes, &normalize_issue_state_transition/1)}
+
+      {:ok, %{"data" => %{"issue" => nil}}} ->
+        {:error, :issue_not_found}
 
       {:ok, %{"errors" => errors}} ->
         {:error, {:linear_graphql_errors, errors}}
@@ -534,6 +595,18 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp normalize_issue(_issue, _assignee_filter), do: nil
+
+  defp normalize_issue_state_transition(%{} = transition) do
+    %{
+      created_at: parse_datetime(transition["createdAt"]),
+      from_state: state_transition_name(transition["fromState"]),
+      to_state: state_transition_name(transition["toState"])
+    }
+  end
+
+  defp state_transition_name(%{"name" => state_name}) when is_binary(state_name), do: state_name
+  defp state_transition_name(%{name: state_name}) when is_binary(state_name), do: state_name
+  defp state_transition_name(_state), do: nil
 
   defp assignee_field(%{} = assignee, field) when is_binary(field), do: assignee[field]
   defp assignee_field(_assignee, _field), do: nil

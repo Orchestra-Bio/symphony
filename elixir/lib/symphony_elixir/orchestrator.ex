@@ -20,6 +20,7 @@ defmodule SymphonyElixir.Orchestrator do
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
   @daemon_max_retry_attempts 3
+  @daemon_state_history_limit 8
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_codex_totals %{
@@ -47,7 +48,6 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       blocked: %{},
       retry_attempts: %{},
-      daemon_lease_states: %{},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -229,8 +229,7 @@ defmodule SymphonyElixir.Orchestrator do
         issue_url: running_entry.issue.url,
         delay_type: :continuation,
         worker_host: Map.get(running_entry, :worker_host),
-        workspace_path: Map.get(running_entry, :workspace_path),
-        daemon_pre_lease_state: Map.get(running_entry, :daemon_pre_lease_state)
+        workspace_path: Map.get(running_entry, :workspace_path)
       })
     end
   end
@@ -261,8 +260,7 @@ defmodule SymphonyElixir.Orchestrator do
       issue_url: running_entry.issue.url,
       error: "agent exited: #{inspect(reason)}",
       worker_host: Map.get(running_entry, :worker_host),
-      workspace_path: Map.get(running_entry, :workspace_path),
-      daemon_pre_lease_state: Map.get(running_entry, :daemon_pre_lease_state)
+      workspace_path: Map.get(running_entry, :workspace_path)
     }
 
     if daemon_retry_exhausted?(Map.get(running_entry, :issue), next_attempt) do
@@ -621,8 +619,7 @@ defmodule SymphonyElixir.Orchestrator do
           | running: Map.delete(state.running, issue_id),
             claimed: MapSet.delete(state.claimed, issue_id),
             blocked: Map.delete(state.blocked, issue_id),
-            retry_attempts: Map.delete(state.retry_attempts, issue_id),
-            daemon_lease_states: Map.delete(state.daemon_lease_states, issue_id)
+            retry_attempts: Map.delete(state.retry_attempts, issue_id)
         }
 
       _ ->
@@ -682,8 +679,7 @@ defmodule SymphonyElixir.Orchestrator do
         |> schedule_issue_retry(issue_id, next_attempt, %{
           identifier: identifier,
           issue_url: running_entry.issue.url,
-          error: "stalled for #{elapsed_ms}ms without codex activity",
-          daemon_pre_lease_state: Map.get(running_entry, :daemon_pre_lease_state)
+          error: "stalled for #{elapsed_ms}ms without codex activity"
         })
       end
     else
@@ -1084,7 +1080,7 @@ defmodule SymphonyElixir.Orchestrator do
          {:ok, [refetched_issue | _]} <- fetch_issue_states_by_ids(opts, [issue.id]),
          %Issue{} = leased_issue <- refetched_issue do
       Logger.info("Leased due daemon for dispatch: #{issue_context(issue)} state=#{target_state}")
-      {leased_issue, put_daemon_lease_state(state, issue.id, issue.state)}
+      {leased_issue, state}
     else
       nil ->
         {nil, state}
@@ -1105,16 +1101,6 @@ defmodule SymphonyElixir.Orchestrator do
         {nil, state}
     end
   end
-
-  defp put_daemon_lease_state(%State{} = state, issue_id, pre_lease_state)
-       when is_binary(issue_id) and is_binary(pre_lease_state) do
-    case String.trim(pre_lease_state) do
-      "" -> state
-      _ -> %{state | daemon_lease_states: Map.put(state.daemon_lease_states, issue_id, pre_lease_state)}
-    end
-  end
-
-  defp put_daemon_lease_state(%State{} = state, _issue_id, _pre_lease_state), do: state
 
   defp update_issue_state(opts, issue_id, state_name) do
     update_fun = Keyword.get(opts, :update_issue_state, &Tracker.update_issue_state/2)
@@ -1221,8 +1207,6 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
-    daemon_pre_lease_state = Map.get(state.daemon_lease_states, issue.id)
-
     case Task.Supervisor.start_child(state.task_supervisor, fn ->
            AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
          end) do
@@ -1252,7 +1236,6 @@ defmodule SymphonyElixir.Orchestrator do
             codex_last_reported_total_tokens: 0,
             turn_count: 0,
             retry_attempt: normalize_retry_attempt(attempt),
-            daemon_pre_lease_state: daemon_pre_lease_state,
             started_at: DateTime.utc_now()
           })
 
@@ -1260,8 +1243,7 @@ defmodule SymphonyElixir.Orchestrator do
           state
           | running: running,
             claimed: MapSet.put(state.claimed, issue.id),
-            retry_attempts: Map.delete(state.retry_attempts, issue.id),
-            daemon_lease_states: Map.delete(state.daemon_lease_states, issue.id)
+            retry_attempts: Map.delete(state.retry_attempts, issue.id)
         }
 
       {:error, reason} ->
@@ -1272,8 +1254,7 @@ defmodule SymphonyElixir.Orchestrator do
           identifier: issue.identifier,
           issue_url: issue.url,
           error: "failed to spawn agent: #{inspect(reason)}",
-          worker_host: worker_host,
-          daemon_pre_lease_state: daemon_pre_lease_state
+          worker_host: worker_host
         })
     end
   end
@@ -1319,7 +1300,6 @@ defmodule SymphonyElixir.Orchestrator do
     error = pick_retry_error(previous_retry, metadata)
     worker_host = pick_retry_worker_host(previous_retry, metadata)
     workspace_path = pick_retry_workspace_path(previous_retry, metadata)
-    daemon_pre_lease_state = pick_retry_daemon_pre_lease_state(previous_retry, metadata)
 
     if is_reference(old_timer) do
       Process.cancel_timer(old_timer)
@@ -1343,8 +1323,7 @@ defmodule SymphonyElixir.Orchestrator do
             issue_url: issue_url,
             error: error,
             worker_host: worker_host,
-            workspace_path: workspace_path,
-            daemon_pre_lease_state: daemon_pre_lease_state
+            workspace_path: workspace_path
           })
     }
   end
@@ -1357,8 +1336,7 @@ defmodule SymphonyElixir.Orchestrator do
           issue_url: Map.get(retry_entry, :issue_url),
           error: Map.get(retry_entry, :error),
           worker_host: Map.get(retry_entry, :worker_host),
-          workspace_path: Map.get(retry_entry, :workspace_path),
-          daemon_pre_lease_state: Map.get(retry_entry, :daemon_pre_lease_state)
+          workspace_path: Map.get(retry_entry, :workspace_path)
         }
 
         {:ok, attempt, metadata, %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}}
@@ -1452,7 +1430,6 @@ defmodule SymphonyElixir.Orchestrator do
     if retry_candidate_issue?(issue, terminal_state_set()) and
          dispatch_slots_available?(issue, state) and
          worker_slots_available?(state, metadata[:worker_host]) do
-      state = restore_daemon_lease_state_from_retry(state, issue, metadata)
       {:noreply, dispatch_issue(state, issue, attempt, metadata[:worker_host])}
     else
       Logger.debug("No available slots for retrying #{issue_context(issue)}; retrying again")
@@ -1470,22 +1447,12 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp restore_daemon_lease_state_from_retry(%State{} = state, %Issue{} = issue, metadata)
-       when is_map(metadata) do
-    if daemon_dispatch_issue?(issue) do
-      put_daemon_lease_state(state, issue.id, metadata[:daemon_pre_lease_state])
-    else
-      state
-    end
-  end
-
   defp release_issue_claim(%State{} = state, issue_id) do
     %{
       state
       | claimed: MapSet.delete(state.claimed, issue_id),
         blocked: Map.delete(state.blocked, issue_id),
-        retry_attempts: Map.delete(state.retry_attempts, issue_id),
-        daemon_lease_states: Map.delete(state.daemon_lease_states, issue_id)
+        retry_attempts: Map.delete(state.retry_attempts, issue_id)
     }
   end
 
@@ -1497,16 +1464,22 @@ defmodule SymphonyElixir.Orchestrator do
   defp daemon_retry_exhausted?(_issue, _next_attempt), do: false
 
   defp daemon_dispatch_issue?(%Issue{state: state_name}) when is_binary(state_name) do
-    MapSet.member?(Config.daemon_dispatch_state_set(), normalize_issue_state(state_name))
+    daemon_dispatch_state_name?(state_name)
   end
 
   defp daemon_dispatch_issue?(_issue), do: false
 
+  defp daemon_dispatch_state_name?(state_name) when is_binary(state_name) do
+    MapSet.member?(Config.daemon_dispatch_state_set(), normalize_issue_state(state_name))
+  end
+
+  defp daemon_dispatch_state_name?(_state_name), do: false
+
   defp park_exhausted_daemon(%State{} = state, issue_id, running_entry, retry_metadata) do
     issue = Map.get(running_entry, :issue)
 
-    case daemon_pre_lease_state(running_entry, retry_metadata) do
-      target_state when is_binary(target_state) ->
+    case daemon_resting_state_from_history(issue_id) do
+      {:ok, target_state} ->
         case update_issue_state([], issue_id, target_state) do
           :ok ->
             Logger.warning("Daemon retry exhausted for issue_id=#{issue_id} issue_identifier=#{Map.get(running_entry, :identifier)}; restored state=#{target_state}")
@@ -1519,24 +1492,51 @@ defmodule SymphonyElixir.Orchestrator do
               state,
               issue_id,
               @daemon_max_retry_attempts + 1,
-              Map.put(retry_metadata, :error, "failed to restore daemon pre-lease state: #{inspect(reason)}")
+              Map.put(retry_metadata, :error, "failed to restore daemon resting state from history: #{inspect(reason)}")
             )
         end
 
-      nil ->
-        Logger.warning("Daemon retry exhausted for #{issue_context(issue)}, but no pre-lease state is known; leaving issue in dispatch state for operator recovery")
+      :missing ->
+        Logger.warning(
+          "Daemon retry exhausted for #{issue_context(issue)}, but no matching lease transition was found in recent issue history; leaving issue in dispatch state for operator recovery. It remains dispatchable and may retry until history is available or an operator moves it."
+        )
 
-        %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id), daemon_lease_states: Map.delete(state.daemon_lease_states, issue_id)}
+        %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Daemon retry exhausted for #{issue_context(issue)}, but issue history could not be read: #{inspect(reason)}; leaving issue in dispatch state for operator recovery. It remains dispatchable and may retry until history is available or an operator moves it."
+        )
+
+        %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}
     end
   end
 
-  defp daemon_pre_lease_state(running_entry, retry_metadata) do
-    [Map.get(running_entry, :daemon_pre_lease_state), retry_metadata[:daemon_pre_lease_state]]
-    |> Enum.find(&valid_daemon_pre_lease_state?/1)
+  defp daemon_resting_state_from_history(issue_id) do
+    with {:ok, transitions} <- Tracker.fetch_issue_state_history(issue_id, @daemon_state_history_limit) do
+      transitions
+      |> newest_daemon_resting_transition()
+      |> case do
+        %{from_state: state_name} when is_binary(state_name) -> {:ok, state_name}
+        nil -> :missing
+      end
+    end
   end
 
-  defp valid_daemon_pre_lease_state?(state_name) when is_binary(state_name), do: String.trim(state_name) != ""
-  defp valid_daemon_pre_lease_state?(_state_name), do: false
+  defp newest_daemon_resting_transition(transitions) when is_list(transitions) do
+    transitions
+    |> Enum.filter(&daemon_resting_transition?/1)
+    |> Enum.max_by(& &1.created_at, DateTime, fn -> nil end)
+  end
+
+  defp daemon_resting_transition?(%{created_at: %DateTime{}, from_state: from_state, to_state: to_state}) do
+    daemon_dispatch_state_name?(to_state) and valid_transition_state_name?(from_state)
+  end
+
+  defp daemon_resting_transition?(_transition), do: false
+
+  defp valid_transition_state_name?(state_name) when is_binary(state_name), do: String.trim(state_name) != ""
+  defp valid_transition_state_name?(_state_name), do: false
 
   defp ensure_candidate_workpads(issues) when is_list(issues) do
     issues
@@ -1633,10 +1633,6 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp pick_retry_workspace_path(previous_retry, metadata) do
     metadata[:workspace_path] || Map.get(previous_retry, :workspace_path)
-  end
-
-  defp pick_retry_daemon_pre_lease_state(previous_retry, metadata) do
-    metadata[:daemon_pre_lease_state] || Map.get(previous_retry, :daemon_pre_lease_state)
   end
 
   defp maybe_put_runtime_value(running_entry, _key, nil), do: running_entry
