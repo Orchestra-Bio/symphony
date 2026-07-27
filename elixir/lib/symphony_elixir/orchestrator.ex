@@ -1497,12 +1497,16 @@ defmodule SymphonyElixir.Orchestrator do
         end
 
       :missing ->
-        Logger.warning("Daemon retry exhausted for #{issue_context(issue)}, but no matching lease transition was found in recent issue history; leaving issue in dispatch state for operator recovery")
+        Logger.warning(
+          "Daemon retry exhausted for #{issue_context(issue)}, but no matching lease transition was found in recent issue history; leaving issue in dispatch state for operator recovery. It remains dispatchable and may retry until history is available or an operator moves it."
+        )
 
         %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}
 
       {:error, reason} ->
-        Logger.warning("Daemon retry exhausted for #{issue_context(issue)}, but issue history could not be read: #{inspect(reason)}; leaving issue in dispatch state for operator recovery")
+        Logger.warning(
+          "Daemon retry exhausted for #{issue_context(issue)}, but issue history could not be read: #{inspect(reason)}; leaving issue in dispatch state for operator recovery. It remains dispatchable and may retry until history is available or an operator moves it."
+        )
 
         %{state | retry_attempts: Map.delete(state.retry_attempts, issue_id)}
     end
@@ -1511,21 +1515,25 @@ defmodule SymphonyElixir.Orchestrator do
   defp daemon_resting_state_from_history(issue_id) do
     with {:ok, transitions} <- Tracker.fetch_issue_state_history(issue_id, @daemon_state_history_limit) do
       transitions
-      |> Enum.find_value(&resting_state_from_transition/1)
+      |> newest_daemon_resting_transition()
       |> case do
-        state_name when is_binary(state_name) -> {:ok, state_name}
+        %{from_state: state_name} when is_binary(state_name) -> {:ok, state_name}
         nil -> :missing
       end
     end
   end
 
-  defp resting_state_from_transition(%{from_state: from_state, to_state: to_state}) do
-    if daemon_dispatch_state_name?(to_state) and valid_transition_state_name?(from_state) do
-      from_state
-    end
+  defp newest_daemon_resting_transition(transitions) when is_list(transitions) do
+    transitions
+    |> Enum.filter(&daemon_resting_transition?/1)
+    |> Enum.max_by(& &1.created_at, DateTime, fn -> nil end)
   end
 
-  defp resting_state_from_transition(_transition), do: nil
+  defp daemon_resting_transition?(%{created_at: %DateTime{}, from_state: from_state, to_state: to_state}) do
+    daemon_dispatch_state_name?(to_state) and valid_transition_state_name?(from_state)
+  end
+
+  defp daemon_resting_transition?(_transition), do: false
 
   defp valid_transition_state_name?(state_name) when is_binary(state_name), do: String.trim(state_name) != ""
   defp valid_transition_state_name?(_state_name), do: false

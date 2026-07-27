@@ -57,8 +57,8 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     Application.put_env(:symphony_elixir, :memory_tracker_issue_history, %{
       issue_id => [
         %{created_at: ~U[2026-07-26 15:03:00Z], from_state: "Human Input Needed", to_state: "Rework"},
-        %{created_at: ~U[2026-07-26 15:02:00Z], from_state: "Happy", to_state: "Legacy Evaluating"},
-        %{created_at: ~U[2026-07-26 15:01:00Z], from_state: "Unhappy", to_state: "Evaluating"}
+        %{created_at: ~U[2026-07-26 15:01:00Z], from_state: "Unhappy", to_state: "Evaluating"},
+        %{created_at: ~U[2026-07-26 15:02:00Z], from_state: "Happy", to_state: "Legacy Evaluating"}
       ]
     })
 
