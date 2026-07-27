@@ -8,7 +8,7 @@ defmodule SymphonyElixir.Linear.Client do
   alias SymphonyElixir.Config.Schema.Tracker, as: TrackerConfig
 
   @issue_page_size 50
-  @comment_page_size 1
+  @comment_page_size 2
   @max_error_body_log_bytes 1_000
 
   @issue_node_fields """
@@ -48,7 +48,7 @@ defmodule SymphonyElixir.Linear.Client do
           }
         }
         # Select the engine-owned workpad anchor without reading large comment bodies.
-        # updatedAt plus first: 1 makes duplicate anchors deterministic.
+        # first: 2 keeps duplicate-anchor warnings reachable while bounding payload.
         comments(first: $commentFirst, orderBy: updatedAt, filter: {body: {startsWithIgnoreCase: $commentAnchorTitle}}) {
           nodes {
             id

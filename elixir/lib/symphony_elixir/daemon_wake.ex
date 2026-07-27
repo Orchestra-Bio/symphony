@@ -183,23 +183,16 @@ defmodule SymphonyElixir.DaemonWake do
   defp supported_wake_label?("wake:" <> cadence), do: Map.has_key?(@supported_wakes, cadence)
 
   defp resolve_anchor(issue) do
-    anchor_comments =
-      issue.comments
-      |> Enum.flat_map(fn comment ->
-        case comment_updated_at(comment) do
-          %DateTime{} = updated_at -> [%{comment: comment, updated_at: updated_at}]
-          _updated_at -> []
-        end
-      end)
+    anchor_comments = Issue.anchor_comments(issue)
 
     duplicate_warning =
       if length(anchor_comments) > 1, do: [:duplicate_workpad_anchors], else: []
 
-    case latest_anchor(anchor_comments) do
-      %{comment: comment, updated_at: updated_at} ->
-        {:ok, comment_id(comment), updated_at, duplicate_warning}
+    case Issue.latest_anchor_comment(issue) do
+      {:ok, %{updated_at: %DateTime{} = updated_at} = comment} ->
+        {:ok, Map.get(comment, :id), updated_at, duplicate_warning}
 
-      nil ->
+      {:error, :missing_workpad_anchor} ->
         case issue.created_at do
           %DateTime{} = created_at ->
             {:ok, nil, created_at, [:missing_workpad_anchor]}
@@ -209,18 +202,6 @@ defmodule SymphonyElixir.DaemonWake do
         end
     end
   end
-
-  defp latest_anchor(anchor_comments) do
-    Enum.max_by(
-      anchor_comments,
-      & &1.updated_at,
-      fn left, right -> DateTime.compare(left, right) != :lt end,
-      fn -> nil end
-    )
-  end
-
-  defp comment_updated_at(comment), do: Map.get(comment, :updated_at)
-  defp comment_id(comment), do: Map.get(comment, :id)
 
   defp normalized_states(values) do
     values

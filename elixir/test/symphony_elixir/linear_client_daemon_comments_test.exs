@@ -75,7 +75,9 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
     assert query =~ "updatedAt"
     # `body` appears in the filter expression; this only rejects a selected body field.
     refute query =~ ~r/\n\s+body\s*\n/
-    assert variables["commentFirst"] == 1
+    # >= 2 so DaemonWake's :duplicate_workpad_anchors warning is reachable;
+    # first: 1 would silently make it dead code.
+    assert variables["commentFirst"] == 2
     assert variables["commentAnchorTitle"] == Issue.workpad_title()
     assert variables["relationFirst"] == 50
   end
@@ -124,7 +126,7 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
     assert_receive {:fetch_issue_states_request, query,
                     %{
                       ids: ["issue-1"],
-                      commentFirst: 1,
+                      commentFirst: 2,
                       commentAnchorTitle: comment_anchor_title
                     }}
 
