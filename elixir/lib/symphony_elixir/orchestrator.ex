@@ -7,8 +7,15 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, DaemonWake, StatusDashboard, SymphonyWorkpad, Tracker, Workspace}
+  alias SymphonyElixir.AgentRunner
+  alias SymphonyElixir.Config
+  alias SymphonyElixir.DaemonWake
   alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.MaturityGate
+  alias SymphonyElixir.StatusDashboard
+  alias SymphonyElixir.SymphonyWorkpad
+  alias SymphonyElixir.Tracker
+  alias SymphonyElixir.Workspace
 
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
@@ -572,7 +579,9 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp refresh_running_issue_state(%State{} = state, %Issue{} = issue) do
     case Map.get(state.running, issue.id) do
-      %{issue: _} = running_entry ->
+      %{issue: %Issue{} = previous_issue} = running_entry ->
+        maybe_emit_maturity_regression_advisories(previous_issue, issue)
+
         %{state | running: Map.put(state.running, issue.id, %{running_entry | issue: issue})}
 
       _ ->
@@ -866,7 +875,7 @@ defmodule SymphonyElixir.Orchestrator do
          terminal_states
        ) do
     candidate_issue?(issue, active_states, terminal_states) and
-      !todo_issue_blocked_by_non_terminal?(issue, terminal_states) and
+      maturity_gate_allows?(issue, terminal_states) and
       !MapSet.member?(claimed, issue.id) and
       !Map.has_key?(running, issue.id) and
       !Map.has_key?(blocked, issue.id) and
@@ -919,22 +928,92 @@ defmodule SymphonyElixir.Orchestrator do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end
 
-  defp todo_issue_blocked_by_non_terminal?(
-         %Issue{state: issue_state, blocked_by: blockers},
-         terminal_states
-       )
-       when is_binary(issue_state) and is_list(blockers) do
-    normalize_issue_state(issue_state) == "todo" and
-      Enum.any?(blockers, fn
-        %{state: blocker_state} when is_binary(blocker_state) ->
-          !terminal_issue_state?(blocker_state, terminal_states)
+  defp maturity_gate_allows?(%Issue{} = issue, terminal_states) do
+    decision = MaturityGate.evaluate(issue, maturity_gate_config(terminal_states))
 
-        _ ->
-          true
-      end)
+    log_maturity_gate_warnings(issue, decision.warnings)
+
+    case MaturityGate.result(decision) do
+      {:gated, _blockers} -> false
+      _result -> true
+    end
   end
 
-  defp todo_issue_blocked_by_non_terminal?(_issue, _terminal_states), do: false
+  defp maturity_gate_config(terminal_states) do
+    tracker = Config.settings!().tracker
+
+    %{
+      terminal_states: MapSet.to_list(terminal_states),
+      daemon_states: tracker.daemon_states,
+      maturity_labels: tracker.maturity_labels,
+      maturity_gate_state_scope: tracker.maturity_gate_state_scope
+    }
+  end
+
+  defp log_maturity_gate_warnings(%Issue{} = issue, warnings) when is_list(warnings) do
+    Enum.each(warnings, fn {:daemon_blocker_ignored, blocker} ->
+      Logger.warning(
+        "Ignoring daemon-state blocker in maturity gate: #{issue_context(issue)} " <>
+          "blocker=#{blocker_context(blocker)}"
+      )
+    end)
+  end
+
+  defp maybe_emit_maturity_regression_advisories(%Issue{} = previous_issue, %Issue{} = refreshed_issue) do
+    previous_issue
+    |> MaturityGate.maturity_regressions(refreshed_issue, maturity_gate_config(terminal_state_set()))
+    |> Enum.each(fn blocker ->
+      emit_maturity_regression_advisory(refreshed_issue, blocker)
+    end)
+  end
+
+  defp emit_maturity_regression_advisory(%Issue{} = issue, blocker) when is_map(blocker) do
+    body = maturity_regression_advisory_body(issue, blocker)
+
+    case Tracker.create_comment(issue.id, body) do
+      :ok ->
+        Logger.info(
+          "Created maturity regression advisory for #{issue_context(issue)} " <>
+            "blocker=#{blocker_context(blocker)}"
+        )
+
+      {:error, reason} ->
+        Logger.warning(
+          "Failed to create maturity regression advisory for #{issue_context(issue)} " <>
+            "blocker=#{blocker_context(blocker)}: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp maturity_regression_advisory_body(%Issue{} = issue, blocker) when is_map(blocker) do
+    """
+    ## Maturity Regression Advisory
+
+    Direct blocker `#{blocker_identifier(blocker)}` no longer carries a configured maturity label.
+    It is still `#{blocker_state(blocker)}`.
+
+    The dependent worker for `#{issue.identifier || issue.id}` is left running.
+    Re-read the blocker before deciding whether to pause, rework, or continue.
+    """
+    |> String.trim()
+  end
+
+  defp blocker_context(blocker) when is_map(blocker) do
+    [
+      "id=#{Map.get(blocker, :id) || "n/a"}",
+      "identifier=#{Map.get(blocker, :identifier) || "n/a"}",
+      "state=#{Map.get(blocker, :state) || "n/a"}"
+    ]
+    |> Enum.join(" ")
+  end
+
+  defp blocker_identifier(blocker) when is_map(blocker) do
+    Map.get(blocker, :identifier) || Map.get(blocker, :id) || "unknown"
+  end
+
+  defp blocker_state(blocker) when is_map(blocker) do
+    Map.get(blocker, :state) || "unknown"
+  end
 
   defp append_due_daemon_candidates(issues, %State{} = state) when is_list(issues) do
     append_due_daemon_candidates(issues, state, DateTime.utc_now(), [])
@@ -1931,7 +2010,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
     candidate_issue?(issue, active_state_set(), terminal_states) and
-      !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
+      maturity_gate_allows?(issue, terminal_states)
   end
 
   defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do
