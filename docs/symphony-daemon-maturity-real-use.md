@@ -145,7 +145,7 @@ Owner: human operator / human lead Jeremy Carroll.
 
 Commands run for this documentation checkpoint:
 
-- `npx prettier --check examples/cookbook/project-completion-sentinel.md examples/cookbook/daemon-workpad-verdicts.md examples/cookbook/repo-neutral-workspaces.md examples/cookbook/multi-repo-workspaces.md docs/symphony-daemon-maturity-real-use.md`
+- `npx prettier --check examples/cookbook/project-completion-sentinel.md examples/cookbook/daemon-workpad-verdicts.md docs/symphony-daemon-maturity-real-use.md`
   passed.
 - `mix deps.get` passed in `elixir/` to install dependencies needed by the local
   PR-body checker in this fresh clone.
