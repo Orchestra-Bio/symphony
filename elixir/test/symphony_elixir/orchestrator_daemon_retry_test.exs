@@ -86,6 +86,52 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
     assert_receive {:memory_tracker_state_update, ^issue_id, "Happy"}
   end
 
+  test "daemon exhaustion retries instead of parking when Unhappy is not configured" do
+    write_daemon_workflow_without_unhappy!()
+
+    issue_id = "daemon-missing-unhappy"
+    ref = make_ref()
+    orchestrator_name = Module.concat(__MODULE__, :DaemonMissingUnhappyOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+    stop_on_exit(pid)
+
+    running_issue =
+      issue(%{
+        id: issue_id,
+        identifier: "ABC-288-MISSING-UNHAPPY",
+        state: "Evaluating",
+        comments: [comment("workpad-missing-unhappy", ~U[2026-07-26 15:00:00Z])]
+      })
+
+    :sys.replace_state(pid, fn state ->
+      %{
+        state
+        | running: %{issue_id => running_entry(running_issue, ref, retry_attempt: 3)},
+          claimed: MapSet.new([issue_id]),
+          retry_attempts: %{}
+      }
+    end)
+
+    log =
+      capture_log(fn ->
+        send(pid, {:DOWN, ref, :process, self(), :boom})
+
+        assert_receive {:memory_tracker_comment_update, "workpad-missing-unhappy", body}, 1_000
+        assert String.starts_with?(body, "## Symphony Workpad\nLast run ")
+
+        Process.sleep(50)
+      end)
+
+    assert log =~ "tracker.daemon_states must include \"unhappy\""
+    refute_receive {:memory_tracker_state_update, ^issue_id, _state}, 50
+
+    assert %{
+             attempt: 4,
+             identifier: "ABC-288-MISSING-UNHAPPY",
+             error: "missing daemon unhappy state configuration"
+           } = :sys.get_state(pid).retry_attempts[issue_id]
+  end
+
   test "normal tickets keep retrying after the daemon exhaustion boundary" do
     issue_id = "normal-retry"
     ref = make_ref()
@@ -127,6 +173,29 @@ defmodule SymphonyElixir.OrchestratorDaemonRetryTest do
       active_states: ["Todo", "Evaluating", "Legacy Evaluating"]
       terminal_states: ["Done", "Canceled"]
       daemon_states: ["Happy", "Unhappy"]
+      daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]
+      daemon_default_wake: "1h"
+    agent:
+      max_concurrent_agents: 3
+      max_concurrent_agents_by_state: {"evaluating": 2, "legacy evaluating": 2}
+    polling:
+      interval_ms: 60000
+    ---
+    You are an agent for this repository.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+  end
+
+  defp write_daemon_workflow_without_unhappy! do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+      active_states: ["Todo", "Evaluating", "Legacy Evaluating"]
+      terminal_states: ["Done", "Canceled"]
+      daemon_states: ["Happy"]
       daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]
       daemon_default_wake: "1h"
     agent:

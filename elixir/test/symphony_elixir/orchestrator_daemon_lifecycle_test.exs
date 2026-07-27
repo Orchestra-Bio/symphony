@@ -62,6 +62,35 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
     assert_receive {:leased, "daemon-due", "Evaluating"}
   end
 
+  test "daemon sleep candidates create missing workpad anchors before wake evaluation" do
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    daemon =
+      issue(%{
+        id: "daemon-new-anchor",
+        identifier: "ABC-288-ANCHOR",
+        state: "Happy",
+        labels: ["wake:1h"],
+        comments: [],
+        created_at: ~U[2026-07-26 08:00:00Z]
+      })
+
+    assert {:ok, []} =
+             Orchestrator.append_due_daemon_candidates_for_test(
+               [],
+               state(),
+               ~U[2026-07-26 10:00:00Z],
+               fetch_issues_by_states: fn ["happy", "unhappy"] -> {:ok, [daemon]} end,
+               update_issue_state: fn issue_id, state_name ->
+                 send(self(), {:unexpected_lease, issue_id, state_name})
+                 :ok
+               end
+             )
+
+    assert_receive {:memory_tracker_comment, "daemon-new-anchor", "## Symphony Workpad\nNew"}
+    refute_receive {:unexpected_lease, _, _}, 50
+  end
+
   test "daemon in any configured dispatch state is dispatchable for crash recovery" do
     recovery_issue =
       issue(%{

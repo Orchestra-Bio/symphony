@@ -935,6 +935,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       true ->
         with {:ok, daemon_issues} <- fetch_daemon_sleep_candidates(opts) do
+          daemon_issues = ensure_candidate_workpads(daemon_issues)
           {:ok, issues ++ lease_due_daemon_candidates(daemon_issues, state, now, opts)}
         end
     end
@@ -1372,21 +1373,34 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp park_exhausted_daemon(%State{} = state, issue_id, running_entry, retry_metadata) do
     issue = Map.get(running_entry, :issue)
-    target_state = daemon_unhappy_state_name()
 
-    case update_issue_state([], issue_id, target_state) do
-      :ok ->
-        Logger.warning("Daemon retry exhausted for issue_id=#{issue_id} issue_identifier=#{Map.get(running_entry, :identifier)}; parked state=#{target_state}")
-        release_issue_claim(state, issue_id)
+    case daemon_unhappy_state_name() do
+      target_state when is_binary(target_state) ->
+        case update_issue_state([], issue_id, target_state) do
+          :ok ->
+            Logger.warning("Daemon retry exhausted for issue_id=#{issue_id} issue_identifier=#{Map.get(running_entry, :identifier)}; parked state=#{target_state}")
+            release_issue_claim(state, issue_id)
 
-      {:error, reason} ->
-        Logger.warning("Failed to park exhausted daemon #{issue_context(issue)} state=#{target_state}: #{inspect(reason)}; retrying")
-        schedule_issue_retry(state, issue_id, @daemon_max_retry_attempts + 1, retry_metadata)
+          {:error, reason} ->
+            Logger.warning("Failed to park exhausted daemon #{issue_context(issue)} state=#{target_state}: #{inspect(reason)}; retrying")
+            schedule_issue_retry(state, issue_id, @daemon_max_retry_attempts + 1, retry_metadata)
+        end
+
+      nil ->
+        Logger.error("Cannot park exhausted daemon #{issue_context(issue)}; tracker.daemon_states must include \"unhappy\" until tracker.daemon_unhappy_state exists")
+
+        schedule_issue_retry(
+          state,
+          issue_id,
+          @daemon_max_retry_attempts + 1,
+          Map.put(retry_metadata, :error, "missing daemon unhappy state configuration")
+        )
     end
   end
 
   defp daemon_unhappy_state_name do
-    if MapSet.member?(Config.daemon_state_set(), "unhappy"), do: "Unhappy", else: "unhappy"
+    # Convention until config grows a dedicated tracker.daemon_unhappy_state field.
+    if MapSet.member?(Config.daemon_state_set(), "unhappy"), do: "Unhappy"
   end
 
   defp ensure_candidate_workpads(issues) when is_list(issues) do
