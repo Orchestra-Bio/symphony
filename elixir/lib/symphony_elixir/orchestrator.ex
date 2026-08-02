@@ -436,7 +436,11 @@ defmodule SymphonyElixir.Orchestrator do
   @spec evaluate_dispatch_issue_for_test(Issue.t(), term()) :: {boolean(), term()}
   def evaluate_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
     context = dispatch_context()
-    gate_decisions = maturity_gate_decisions_by_issue([%{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}])
+
+    gate_decisions =
+      maturity_gate_decisions_by_issue([
+        %{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}
+      ])
 
     evaluate_dispatch_issue(issue, state, context, gate_decisions)
   end
