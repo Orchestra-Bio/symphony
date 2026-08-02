@@ -130,9 +130,13 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <p class="section-copy">Dependency-blocked candidate issues from the latest gate evaluation.</p>
             </div>
             <span :if={@payload.maturity_gate.evaluated_at} class="muted mono">
-              <%= @payload.maturity_gate.evaluated_at %>
+              <%= format_snapshot_time(@payload.maturity_gate.evaluated_at, @now) %>
             </span>
           </div>
+
+          <p :if={@payload.maturity_gate.error} class="gate-error">
+            Latest gate evaluation unavailable: <%= @payload.maturity_gate.error %>
+          </p>
 
           <div class="config-grid">
             <div class="config-item">
@@ -504,6 +508,18 @@ defmodule SymphonyElixirWeb.DashboardLive do
     secs = rem(whole_seconds, 60)
     "#{mins}m #{secs}s"
   end
+
+  defp format_snapshot_time(evaluated_at, now) when is_binary(evaluated_at) do
+    case DateTime.from_iso8601(evaluated_at) do
+      {:ok, parsed, _offset} ->
+        "#{evaluated_at} (#{format_runtime_seconds(DateTime.diff(now, parsed, :second))} ago)"
+
+      _ ->
+        evaluated_at
+    end
+  end
+
+  defp format_snapshot_time(_evaluated_at, _now), do: nil
 
   defp runtime_seconds_from_started_at(%DateTime{} = started_at, %DateTime{} = now) do
     DateTime.diff(now, started_at, :second)

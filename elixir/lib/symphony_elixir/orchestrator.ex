@@ -17,6 +17,14 @@ defmodule SymphonyElixir.Orchestrator do
   alias SymphonyElixir.Tracker
   alias SymphonyElixir.Workspace
 
+  @type state_set :: [String.t()]
+  @type dispatch_context :: %{
+          required(:config) => Config.Schema.t(),
+          required(:active_states) => state_set(),
+          required(:terminal_states) => state_set(),
+          required(:maturity_gate_config) => MaturityGate.config()
+        }
+
   @continuation_retry_delay_ms 1_000
   @failure_retry_base_ms 10_000
   @daemon_max_retry_attempts 3
@@ -35,6 +43,8 @@ defmodule SymphonyElixir.Orchestrator do
     Runtime state for the orchestrator polling loop.
     """
 
+    @type t :: %__MODULE__{}
+
     defstruct [
       :poll_interval_ms,
       :max_concurrent_agents,
@@ -50,7 +60,7 @@ defmodule SymphonyElixir.Orchestrator do
       retry_attempts: %{},
       dispatch_rejections: %{},
       maturity_gate_log_decisions: %{},
-      maturity_gate_decisions: %{gated: [], out_of_scope: [], evaluated_at: nil},
+      maturity_gate_snapshot: %{gated: [], out_of_scope: [], evaluated_at: nil, error: nil},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -280,53 +290,51 @@ defmodule SymphonyElixir.Orchestrator do
       |> reconcile_running_issues()
       |> reconcile_blocked_issues()
 
-    active_states = active_state_set()
-    terminal_states = terminal_state_set()
-
     with :ok <- Config.validate!(),
+         context <- dispatch_context(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          issues <- ensure_candidate_workpads(issues),
-         {:ok, issues, state} <- append_due_daemon_candidates(issues, state) do
-      state = record_maturity_gate_decisions(state, issues, active_states, terminal_states)
-      choose_issues(issues, state, active_states, terminal_states)
+         {:ok, issues, state} <- append_due_daemon_candidates(issues, state, context) do
+      {state, gate_decisions} = record_maturity_gate_snapshot(state, issues, context)
+      choose_issues(issues, state, context, gate_decisions)
     else
       {:error, :missing_linear_api_token} ->
         Logger.error("Linear API token missing in WORKFLOW.md")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, :missing_linear_api_token)
 
       {:error, :missing_linear_issue_selector} ->
         Logger.error("Linear issue selector missing in WORKFLOW.md; set tracker.project_slug or tracker.team_key")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, :missing_linear_issue_selector)
 
       {:error, :missing_tracker_kind} ->
         Logger.error("Tracker kind missing in WORKFLOW.md")
 
-        state
+        mark_maturity_gate_snapshot_unavailable(state, :missing_tracker_kind)
 
       {:error, {:unsupported_tracker_kind, kind}} ->
         Logger.error("Unsupported tracker kind in WORKFLOW.md: #{inspect(kind)}")
 
-        state
+        mark_maturity_gate_snapshot_unavailable(state, {:unsupported_tracker_kind, kind})
 
       {:error, {:invalid_workflow_config, message}} ->
         Logger.error("Invalid WORKFLOW.md config: #{message}")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, {:invalid_workflow_config, message})
 
       {:error, {:missing_workflow_file, path, reason}} ->
         Logger.error("Missing WORKFLOW.md at #{path}: #{inspect(reason)}")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, {:missing_workflow_file, path, reason})
 
       {:error, :workflow_front_matter_not_a_map} ->
         Logger.error("Failed to parse WORKFLOW.md: workflow front matter must decode to a map")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, :workflow_front_matter_not_a_map)
 
       {:error, {:workflow_parse_error, reason}} ->
         Logger.error("Failed to parse WORKFLOW.md: #{inspect(reason)}")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, {:workflow_parse_error, reason})
 
       {:error, reason} ->
         Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
-        state
+        mark_maturity_gate_snapshot_unavailable(state, reason)
     end
   end
 
@@ -407,17 +415,17 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set())
+    context = dispatch_context()
+    should_dispatch_issue?(issue, state, context)
   end
 
   @doc false
   @spec maturity_gate_snapshot_for_test([Issue.t()], term()) :: map()
   def maturity_gate_snapshot_for_test(issues, %State{} = state) when is_list(issues) do
-    terminal_states = terminal_state_set()
+    context = dispatch_context()
 
-    state
-    |> record_maturity_gate_decisions(issues, active_state_set(), terminal_states)
-    |> maturity_gate_snapshot(terminal_states)
+    {state, _gate_decisions} = record_maturity_gate_snapshot(state, issues, context)
+    maturity_gate_snapshot(state, context.terminal_states)
   end
 
   @doc false
@@ -427,7 +435,10 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec evaluate_dispatch_issue_for_test(Issue.t(), term()) :: {boolean(), term()}
   def evaluate_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    evaluate_dispatch_issue(issue, state, active_state_set(), terminal_state_set())
+    context = dispatch_context()
+    gate_decisions = maturity_gate_decisions_by_issue([%{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}])
+
+    evaluate_dispatch_issue(issue, state, context, gate_decisions)
   end
 
   @doc false
@@ -475,6 +486,7 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @spec reconcile_running_issue_states([term()], term(), state_set(), state_set()) :: term()
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -486,6 +498,7 @@ defmodule SymphonyElixir.Orchestrator do
     )
   end
 
+  @spec reconcile_issue_state(term(), term(), state_set(), state_set()) :: term()
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
@@ -510,6 +523,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp reconcile_issue_state(_issue, state, _active_states, _terminal_states), do: state
 
+  @spec reconcile_blocked_issue_states([term()], term(), state_set(), state_set()) :: term()
   defp reconcile_blocked_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_blocked_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -521,6 +535,7 @@ defmodule SymphonyElixir.Orchestrator do
     )
   end
 
+  @spec reconcile_blocked_issue_state(term(), term(), state_set(), state_set()) :: term()
   defp reconcile_blocked_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
@@ -853,13 +868,13 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp choose_issues(issues, state, active_states, terminal_states) do
+  defp choose_issues(issues, state, context, gate_decisions) do
     {state, visible_issue_ids} =
       issues
       |> sort_issues_for_dispatch()
       |> Enum.reduce({state, MapSet.new()}, fn
         %Issue{} = issue, {state_acc, visible_acc} ->
-          {dispatch?, state_acc} = evaluate_dispatch_issue(issue, state_acc, active_states, terminal_states)
+          {dispatch?, state_acc} = evaluate_dispatch_issue(issue, state_acc, context, gate_decisions)
           visible_acc = maybe_put_issue_log_key(visible_acc, issue)
 
           state_acc =
@@ -905,26 +920,26 @@ defmodule SymphonyElixir.Orchestrator do
   defp issue_created_at_sort_key(%Issue{}), do: 9_223_372_036_854_775_807
   defp issue_created_at_sort_key(_issue), do: 9_223_372_036_854_775_807
 
-  defp should_dispatch_issue?(
-         %Issue{} = issue,
-         %State{} = state,
-         active_states,
-         terminal_states
-       ) do
-    {dispatch?, _state} = evaluate_dispatch_issue(issue, state, active_states, terminal_states)
+  defp should_dispatch_issue?(%Issue{} = issue, %State{} = state, context) do
+    gate_decisions =
+      maturity_gate_decisions_by_issue([
+        %{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}
+      ])
+
+    {dispatch?, _state} = evaluate_dispatch_issue(issue, state, context, gate_decisions)
     dispatch?
   end
 
-  defp evaluate_dispatch_issue(%Issue{} = issue, %State{} = state, active_states, terminal_states) do
-    decision = dispatch_decision(issue, state, active_states, terminal_states)
+  defp evaluate_dispatch_issue(%Issue{} = issue, %State{} = state, context, gate_decisions) do
+    decision = dispatch_decision(issue, state, context, gate_decisions)
     state = log_dispatch_decision(issue, state, decision)
     {decision.dispatch, state}
   end
 
-  defp dispatch_decision(%Issue{} = issue, %State{} = state, active_states, terminal_states) do
-    case candidate_rejection(issue, active_states, terminal_states) do
+  defp dispatch_decision(%Issue{} = issue, %State{} = state, context, gate_decisions) do
+    case candidate_rejection(issue, context) do
       nil ->
-        maturity_gate_dispatch_decision(issue, state, terminal_states)
+        maturity_gate_dispatch_decision(issue, state, context, Map.get(gate_decisions, issue.id))
 
       {reason, details} ->
         %{
@@ -935,9 +950,9 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp maturity_gate_dispatch_decision(%Issue{} = issue, %State{} = state, terminal_states) do
-    {gate_decision, gate_config} = maturity_gate_decision(issue, terminal_states)
-    maturity_gate_logs = maturity_gate_logs(issue, gate_decision, gate_config)
+  defp maturity_gate_dispatch_decision(%Issue{} = issue, %State{} = state, context, gate_decision) do
+    gate_decision = gate_decision || MaturityGate.evaluate(issue, context.maturity_gate_config)
+    maturity_gate_logs = maturity_gate_logs(issue, gate_decision, context.maturity_gate_config)
 
     case MaturityGate.result(gate_decision) do
       {:gated, _blockers} ->
@@ -948,7 +963,7 @@ defmodule SymphonyElixir.Orchestrator do
         }
 
       _result ->
-        case dispatch_rejection(issue, state) do
+        case dispatch_rejection(issue, state, context) do
           nil ->
             %{dispatch: true, rejection_log: nil, maturity_gate_logs: maturity_gate_logs}
 
@@ -964,8 +979,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp candidate_rejection(
          %Issue{id: id, identifier: identifier, title: title, state: state_name} = issue,
-         active_states,
-         terminal_states
+         context
        ) do
     cond do
       not present_string?(id) ->
@@ -980,31 +994,32 @@ defmodule SymphonyElixir.Orchestrator do
       not present_string?(state_name) ->
         {:invalid_candidate, %{missing: :state}}
 
-      not issue_routable?(issue) ->
+      not issue_routable?(issue, context) ->
         {:not_routable,
          %{
            assigned_to_worker: issue.assigned_to_worker,
            labels: issue.labels,
-           required_labels: Config.settings!().tracker.required_labels
+           required_labels: context.config.tracker.required_labels
          }}
 
-      terminal_issue_state?(state_name, terminal_states) ->
-        {:terminal_state, %{state: state_name, terminal_states: Enum.sort(MapSet.to_list(terminal_states))}}
+      terminal_issue_state?(state_name, context.terminal_states) ->
+        {:terminal_state, %{state: state_name, terminal_states: Enum.sort(context.terminal_states)}}
 
-      not active_issue_state?(state_name, active_states) ->
-        {:non_active_state, %{state: state_name, active_states: Enum.sort(MapSet.to_list(active_states))}}
+      not active_issue_state?(state_name, context.active_states) ->
+        {:non_active_state, %{state: state_name, active_states: Enum.sort(context.active_states)}}
 
       true ->
         nil
     end
   end
 
-  defp candidate_rejection(_issue, _active_states, _terminal_states),
+  defp candidate_rejection(_issue, _context),
     do: {:invalid_candidate, %{missing: :issue}}
 
   defp dispatch_rejection(
          %Issue{} = issue,
-         %State{running: running, claimed: claimed, blocked: blocked} = state
+         %State{running: running, claimed: claimed, blocked: blocked} = state,
+         context
        ) do
     cond do
       Map.has_key?(running, issue.id) ->
@@ -1016,30 +1031,30 @@ defmodule SymphonyElixir.Orchestrator do
       MapSet.member?(claimed, issue.id) ->
         {:already_claimed, %{}}
 
-      available_slots(state) <= 0 ->
+      available_slots(state, context) <= 0 ->
         {:slot_exhausted,
          %{
            scope: :global,
-           available_slots: available_slots(state),
+           available_slots: available_slots(state, context),
            running_count: map_size(running),
-           max_concurrent_agents: state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents
+           max_concurrent_agents: state.max_concurrent_agents || context.config.agent.max_concurrent_agents
          }}
 
-      not state_slots_available?(issue, running) ->
+      not state_slots_available?(issue, running, context) ->
         {:slot_exhausted,
          %{
            scope: :state,
            state: issue.state,
            running_count: running_issue_count_for_state(running, issue.state),
-           max_concurrent_agents: Config.max_concurrent_agents_for_state(issue.state)
+           max_concurrent_agents: max_concurrent_agents_for_state(issue.state, context)
          }}
 
-      not worker_slots_available?(state) ->
+      not worker_slots_available?(state, context) ->
         {:slot_exhausted,
          %{
            scope: :worker,
-           ssh_hosts: Config.settings!().worker.ssh_hosts,
-           max_concurrent_agents_per_host: Config.settings!().worker.max_concurrent_agents_per_host
+           ssh_hosts: context.config.worker.ssh_hosts,
+           max_concurrent_agents_per_host: context.config.worker.max_concurrent_agents_per_host
          }}
 
       true ->
@@ -1173,13 +1188,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp present_string?(value) when is_binary(value), do: String.trim(value) != ""
   defp present_string?(_value), do: false
 
-  defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
-    limit = Config.max_concurrent_agents_for_state(issue_state)
+  defp state_slots_available?(%Issue{state: issue_state}, running, context) when is_map(running) do
+    limit = max_concurrent_agents_for_state(issue_state, context)
     used = running_issue_count_for_state(running, issue_state)
     limit > used
   end
 
-  defp state_slots_available?(_issue, _running), do: false
+  defp state_slots_available?(_issue, _running, _context), do: false
 
   defp running_issue_count_for_state(running, issue_state) when is_map(running) do
     normalized_state = normalize_issue_state(issue_state)
@@ -1193,6 +1208,7 @@ defmodule SymphonyElixir.Orchestrator do
     end)
   end
 
+  @spec candidate_issue?(term(), dispatch_context()) :: boolean()
   defp candidate_issue?(
          %Issue{
            id: id,
@@ -1200,21 +1216,27 @@ defmodule SymphonyElixir.Orchestrator do
            title: title,
            state: state_name
          } = issue,
-         active_states,
-         terminal_states
+         context
        )
        when is_binary(id) and is_binary(identifier) and is_binary(title) and is_binary(state_name) do
-    issue_routable?(issue) and
-      active_issue_state?(state_name, active_states) and
-      !terminal_issue_state?(state_name, terminal_states)
+    issue_routable?(issue, context) and
+      active_issue_state?(state_name, context.active_states) and
+      !terminal_issue_state?(state_name, context.terminal_states)
   end
 
-  defp candidate_issue?(_issue, _active_states, _terminal_states), do: false
+  defp candidate_issue?(_issue, _context), do: false
 
+  @spec issue_routable?(Issue.t()) :: boolean()
   defp issue_routable?(%Issue{} = issue) do
     Issue.routable?(issue, Config.settings!().tracker.required_labels)
   end
 
+  @spec issue_routable?(Issue.t(), dispatch_context()) :: boolean()
+  defp issue_routable?(%Issue{} = issue, context) do
+    Issue.routable?(issue, context.config.tracker.required_labels)
+  end
+
+  @spec maturity_gate_allows?(Issue.t(), state_set()) :: boolean()
   defp maturity_gate_allows?(%Issue{} = issue, terminal_states) do
     {decision, _config} = maturity_gate_decision(issue, terminal_states)
 
@@ -1226,43 +1248,76 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @spec maturity_gate_decision(Issue.t(), state_set()) :: {MaturityGate.t(), MaturityGate.config()}
   defp maturity_gate_decision(%Issue{} = issue, terminal_states) do
     config = maturity_gate_config(terminal_states)
     {MaturityGate.evaluate(issue, config), config}
   end
 
+  @spec maturity_gate_config(state_set()) :: MaturityGate.config()
   defp maturity_gate_config(terminal_states) do
-    tracker = Config.settings!().tracker
+    maturity_gate_config(Config.settings!(), terminal_states)
+  end
+
+  @spec maturity_gate_config(Config.Schema.t(), state_set()) :: MaturityGate.config()
+  defp maturity_gate_config(config, terminal_states) do
+    tracker = config.tracker
 
     %{
-      terminal_states: terminal_states |> MapSet.to_list() |> Enum.sort(),
+      terminal_states: Enum.sort(terminal_states),
       daemon_states: tracker.daemon_states,
       maturity_labels: tracker.maturity_labels,
       maturity_gate_state_scope: tracker.maturity_gate_state_scope
     }
   end
 
-  defp record_maturity_gate_decisions(%State{} = state, issues, active_states, terminal_states) when is_list(issues) do
-    config = maturity_gate_config(terminal_states)
-
+  defp record_maturity_gate_snapshot(%State{} = state, issues, context) when is_list(issues) do
     issue_decisions =
       issues
-      |> Enum.filter(&candidate_issue?(&1, active_states, terminal_states))
+      |> Enum.filter(&candidate_issue?(&1, context))
       |> Enum.map(fn %Issue{} = issue ->
-        %{issue: issue, decision: MaturityGate.evaluate(issue, config)}
+        %{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}
       end)
 
-    %{
+    state = %{
       state
-      | maturity_gate_decisions: %{
+      | maturity_gate_snapshot: %{
           gated: maturity_gate_issue_decisions(issue_decisions, :gated),
           out_of_scope: maturity_gate_issue_decisions(issue_decisions, :out_of_scope),
-          evaluated_at: DateTime.utc_now()
+          evaluated_at: DateTime.utc_now(),
+          error: nil
+        }
+    }
+
+    {state, maturity_gate_decisions_by_issue(issue_decisions)}
+  end
+
+  defp record_maturity_gate_snapshot(%State{} = state, _issues, _context), do: {state, %{}}
+
+  defp maturity_gate_decisions_by_issue(issue_decisions) when is_list(issue_decisions) do
+    issue_decisions
+    |> Enum.map(fn
+      %{issue: %Issue{id: id}, decision: %MaturityGate{} = decision} when is_binary(id) ->
+        {id, decision}
+
+      _entry ->
+        nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Map.new()
+  end
+
+  defp mark_maturity_gate_snapshot_unavailable(%State{} = state, reason) do
+    %{
+      state
+      | maturity_gate_snapshot: %{
+          gated: [],
+          out_of_scope: [],
+          evaluated_at: nil,
+          error: inspect(reason)
         }
     }
   end
-
-  defp record_maturity_gate_decisions(%State{} = state, _issues, _active_states, _terminal_states), do: state
 
   defp maturity_gate_issue_decisions(issue_decisions, :gated) do
     issue_decisions
@@ -1373,41 +1428,46 @@ defmodule SymphonyElixir.Orchestrator do
     Map.get(blocker, :state) || "unknown"
   end
 
-  defp append_due_daemon_candidates(issues, %State{} = state) when is_list(issues) do
-    append_due_daemon_candidates(issues, state, DateTime.utc_now(), [])
+  defp append_due_daemon_candidates(issues, %State{} = state, context) when is_list(issues) do
+    append_due_daemon_candidates(issues, state, context, DateTime.utc_now(), [])
   end
 
   defp append_due_daemon_candidates(issues, %State{} = state, %DateTime{} = now, opts)
        when is_list(issues) and is_list(opts) do
+    append_due_daemon_candidates(issues, state, dispatch_context(), now, opts)
+  end
+
+  defp append_due_daemon_candidates(issues, %State{} = state, context, %DateTime{} = now, opts)
+       when is_list(issues) and is_list(opts) do
     cond do
-      Config.settings!().tracker.daemon_states == [] ->
+      context.config.tracker.daemon_states == [] ->
         {:ok, issues, state}
 
-      available_slots(state) <= 0 ->
+      available_slots(state, context) <= 0 ->
         {:ok, issues, state}
 
       true ->
-        with {:ok, daemon_issues} <- fetch_daemon_sleep_candidates(opts) do
+        with {:ok, daemon_issues} <- fetch_daemon_sleep_candidates(opts, context) do
           daemon_issues = ensure_candidate_workpads(daemon_issues)
-          {leased_issues, state} = lease_due_daemon_candidates(daemon_issues, state, now, opts)
+          {leased_issues, state} = lease_due_daemon_candidates(daemon_issues, state, now, opts, context)
           {:ok, issues ++ leased_issues, state}
         end
     end
   end
 
-  defp fetch_daemon_sleep_candidates(opts) do
+  defp fetch_daemon_sleep_candidates(opts, context) do
     fetch_fun = Keyword.get(opts, :fetch_issues_by_states, &Tracker.fetch_issues_by_states/1)
-    fetch_fun.(Config.settings!().tracker.daemon_states)
+    fetch_fun.(context.config.tracker.daemon_states)
   end
 
-  defp lease_due_daemon_candidates(issues, %State{} = state, %DateTime{} = now, opts)
+  defp lease_due_daemon_candidates(issues, %State{} = state, %DateTime{} = now, opts, context)
        when is_list(issues) and is_list(opts) do
-    config = daemon_wake_config()
+    config = daemon_wake_config(context)
 
     {leased_issues, state} =
       Enum.reduce(issues, {[], state}, fn
         %Issue{} = issue, {leased_acc, state_acc} ->
-          case lease_due_daemon_candidate(issue, state_acc, now, config, opts) do
+          case lease_due_daemon_candidate(issue, state_acc, now, config, opts, context) do
             {%Issue{} = leased_issue, state_acc} -> {[leased_issue | leased_acc], state_acc}
             {nil, state_acc} -> {leased_acc, state_acc}
           end
@@ -1419,10 +1479,10 @@ defmodule SymphonyElixir.Orchestrator do
     {Enum.reverse(leased_issues), state}
   end
 
-  defp lease_due_daemon_candidate(%Issue{} = issue, %State{} = state, %DateTime{} = now, config, opts) do
+  defp lease_due_daemon_candidate(%Issue{} = issue, %State{} = state, %DateTime{} = now, config, opts, context) do
     case DaemonWake.evaluate(issue, now, config) do
       %DaemonWake{status: :due} ->
-        maybe_lease_daemon(issue, state, opts)
+        maybe_lease_daemon(issue, state, opts, context)
 
       %DaemonWake{status: :invalid, warnings: warnings} ->
         Logger.warning("Skipping daemon wake for #{issue_context(issue)} warnings=#{inspect(warnings)}")
@@ -1433,11 +1493,11 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp maybe_lease_daemon(%Issue{} = issue, %State{} = state, opts) do
-    with target_state when is_binary(target_state) <- daemon_dispatch_target_state_name(),
+  defp maybe_lease_daemon(%Issue{} = issue, %State{} = state, opts, context) do
+    with target_state when is_binary(target_state) <- daemon_dispatch_target_state_name(context),
          leased_issue = %Issue{issue | state: target_state},
-         true <- dispatch_slots_available?(leased_issue, state),
-         true <- worker_slots_available?(state),
+         true <- dispatch_slots_available?(leased_issue, state, context),
+         true <- worker_slots_available?(state, context),
          :ok <- update_issue_state(opts, issue.id, target_state),
          {:ok, [refetched_issue | _]} <- fetch_issue_states_by_ids(opts, [issue.id]),
          %Issue{} = leased_issue <- refetched_issue do
@@ -1474,8 +1534,8 @@ defmodule SymphonyElixir.Orchestrator do
     fetch_fun.(issue_ids)
   end
 
-  defp daemon_wake_config do
-    tracker = Config.settings!().tracker
+  defp daemon_wake_config(context) do
+    tracker = context.config.tracker
 
     %{
       daemon_states: tracker.daemon_states,
@@ -1485,10 +1545,10 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp daemon_dispatch_target_state_name do
-    case Config.daemon_dispatch_target_state() do
+  defp daemon_dispatch_target_state_name(context) do
+    case List.first(context.config.tracker.daemon_dispatch_states) do
       target_state when is_binary(target_state) and target_state != "" ->
-        configured_state_name(Config.settings!().tracker.active_states, target_state) || target_state
+        configured_state_name(context.config.tracker.active_states, target_state) || target_state
 
       _ ->
         nil
@@ -1501,33 +1561,62 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp configured_state_name(_state_names, _normalized_state), do: nil
 
+  @spec terminal_issue_state?(term(), state_set()) :: boolean()
   defp terminal_issue_state?(state_name, terminal_states) when is_binary(state_name) do
-    MapSet.member?(terminal_states, normalize_issue_state(state_name))
+    normalize_issue_state(state_name) in terminal_states
   end
 
   defp terminal_issue_state?(_state_name, _terminal_states), do: false
 
+  @spec active_issue_state?(term(), state_set()) :: boolean()
   defp active_issue_state?(state_name, active_states) when is_binary(state_name) do
-    MapSet.member?(active_states, normalize_issue_state(state_name))
+    normalize_issue_state(state_name) in active_states
   end
 
   defp normalize_issue_state(state_name) when is_binary(state_name) do
     String.downcase(String.trim(state_name))
   end
 
+  @spec terminal_state_set() :: state_set()
   defp terminal_state_set do
     Config.settings!().tracker.terminal_states
-    |> Enum.map(&normalize_issue_state/1)
-    |> Enum.filter(&(&1 != ""))
-    |> MapSet.new()
+    |> state_name_set()
   end
 
+  @spec active_state_set() :: state_set()
   defp active_state_set do
     Config.settings!().tracker.active_states
+    |> state_name_set()
+  end
+
+  @spec dispatch_context() :: dispatch_context()
+  defp dispatch_context do
+    config = Config.settings!()
+    active_states = state_name_set(config.tracker.active_states)
+    terminal_states = state_name_set(config.tracker.terminal_states)
+
+    dispatch_context(config, active_states, terminal_states)
+  end
+
+  @spec dispatch_context(Config.Schema.t(), state_set(), state_set()) :: dispatch_context()
+  defp dispatch_context(config, active_states, terminal_states) do
+    %{
+      config: config,
+      active_states: active_states,
+      terminal_states: terminal_states,
+      maturity_gate_config: maturity_gate_config(config, terminal_states)
+    }
+  end
+
+  @spec state_name_set(term()) :: state_set()
+  defp state_name_set(state_names) when is_list(state_names) do
+    state_names
     |> Enum.map(&normalize_issue_state/1)
     |> Enum.filter(&(&1 != ""))
-    |> MapSet.new()
+    |> Enum.uniq()
   end
+
+  defp state_name_set(_state_names), do: []
 
   defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
     case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
@@ -2004,12 +2093,16 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp select_worker_host(%State{} = state, preferred_worker_host) do
-    case Config.settings!().worker.ssh_hosts do
+    select_worker_host(state, preferred_worker_host, dispatch_context())
+  end
+
+  defp select_worker_host(%State{} = state, preferred_worker_host, context) do
+    case context.config.worker.ssh_hosts do
       [] ->
         nil
 
       hosts ->
-        available_hosts = Enum.filter(hosts, &worker_host_slots_available?(state, &1))
+        available_hosts = Enum.filter(hosts, &worker_host_slots_available?(state, &1, context))
 
         cond do
           available_hosts == [] ->
@@ -2047,16 +2140,16 @@ defmodule SymphonyElixir.Orchestrator do
     end)
   end
 
-  defp worker_slots_available?(%State{} = state) do
-    select_worker_host(state, nil) != :no_worker_capacity
+  defp worker_slots_available?(%State{} = state, %{config: _config} = context) do
+    select_worker_host(state, nil, context) != :no_worker_capacity
   end
 
   defp worker_slots_available?(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host) != :no_worker_capacity
   end
 
-  defp worker_host_slots_available?(%State{} = state, worker_host) when is_binary(worker_host) do
-    case Config.settings!().worker.max_concurrent_agents_per_host do
+  defp worker_host_slots_available?(%State{} = state, worker_host, context) when is_binary(worker_host) do
+    case context.config.worker.max_concurrent_agents_per_host do
       limit when is_integer(limit) and limit > 0 ->
         running_worker_host_count(state.running, worker_host) < limit
 
@@ -2093,13 +2186,23 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp issue_context(_issue), do: "issue_id=n/a issue_identifier=n/a"
 
-  defp available_slots(%State{} = state) do
+  defp available_slots(%State{} = state, context) do
     max(
-      (state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents) -
+      (state.max_concurrent_agents || context.config.agent.max_concurrent_agents) -
         map_size(state.running),
       0
     )
   end
+
+  defp max_concurrent_agents_for_state(state_name, context) when is_binary(state_name) do
+    Map.get(
+      context.config.agent.max_concurrent_agents_by_state,
+      normalize_issue_state(state_name),
+      context.config.agent.max_concurrent_agents
+    )
+  end
+
+  defp max_concurrent_agents_for_state(_state_name, context), do: context.config.agent.max_concurrent_agents
 
   @spec request_refresh() :: map() | :unavailable
   def request_refresh do
@@ -2233,12 +2336,16 @@ defmodule SymphonyElixir.Orchestrator do
   defp blocked_issue_url(%{issue: %Issue{url: url}}), do: url
   defp blocked_issue_url(_metadata), do: nil
 
+  @spec maturity_gate_snapshot(State.t(), state_set()) :: map()
   defp maturity_gate_snapshot(%State{} = state, terminal_states) do
+    snapshot = state.maturity_gate_snapshot
+
     %{
       config: maturity_gate_config(terminal_states),
-      evaluated_at: Map.get(state.maturity_gate_decisions, :evaluated_at),
-      gated: Map.get(state.maturity_gate_decisions, :gated, []),
-      out_of_scope: Map.get(state.maturity_gate_decisions, :out_of_scope, [])
+      evaluated_at: Map.get(snapshot, :evaluated_at),
+      gated: Map.get(snapshot, :gated, []),
+      out_of_scope: Map.get(snapshot, :out_of_scope, []),
+      error: Map.get(snapshot, :error)
     }
   end
 
@@ -2397,13 +2504,20 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
+  @spec retry_candidate_issue?(Issue.t(), state_set()) :: boolean()
   defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
-    candidate_issue?(issue, active_state_set(), terminal_states) and
+    context = dispatch_context(Config.settings!(), active_state_set(), terminal_states)
+
+    candidate_issue?(issue, context) and
       maturity_gate_allows?(issue, terminal_states)
   end
 
   defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do
-    available_slots(state) > 0 and state_slots_available?(issue, state.running)
+    dispatch_slots_available?(issue, state, dispatch_context())
+  end
+
+  defp dispatch_slots_available?(%Issue{} = issue, %State{} = state, context) do
+    available_slots(state, context) > 0 and state_slots_available?(issue, state.running, context)
   end
 
   defp apply_codex_token_delta(

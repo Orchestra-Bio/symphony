@@ -470,6 +470,7 @@ defmodule SymphonyElixir.ExtensionsTest do
              "rate_limits" => %{"primary" => %{"remaining" => 11}},
              "maturity_gate" => %{
                "evaluated_at" => "2026-08-02T16:00:00Z",
+               "error" => nil,
                "config" => %{
                  "maturity_labels" => ["mature"],
                  "maturity_gate_state_scope" => ["todo"],

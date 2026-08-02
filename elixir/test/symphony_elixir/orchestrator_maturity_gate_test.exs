@@ -1,6 +1,15 @@
 defmodule SymphonyElixir.OrchestratorMaturityGateTest do
   use SymphonyElixir.TestSupport
 
+  defmodule FailingLinearClient do
+    def fetch_candidate_issues, do: {:error, :rate_limited}
+    def fetch_issues_by_states(_states), do: {:ok, []}
+    def fetch_issue_states_by_ids(_issue_ids), do: {:ok, []}
+    def fetch_issue_state_history(_issue_id, _limit), do: {:ok, []}
+    def fetch_comment_body(_comment_id), do: {:error, :comment_not_found}
+    def graphql(_query, _variables), do: {:error, :not_implemented}
+  end
+
   setup do
     write_maturity_workflow!()
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
@@ -138,14 +147,38 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
 
     updated_state = Orchestrator.maybe_dispatch_for_test(state(%{max_concurrent_agents: 0}))
 
-    assert %DateTime{} = updated_state.maturity_gate_decisions.evaluated_at
+    assert %DateTime{} = updated_state.maturity_gate_snapshot.evaluated_at
 
     assert [
              %{
                identifier: "ABC-GATED",
                blockers: [%{identifier: "ABC-IMMATURE", status: :gating}]
              }
-           ] = updated_state.maturity_gate_decisions.gated
+           ] = updated_state.maturity_gate_snapshot.gated
+  end
+
+  test "poll clears maturity gate snapshot when candidate fetch fails" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "linear",
+      tracker_api_token: "token",
+      tracker_project_slug: "project"
+    )
+
+    Application.put_env(:symphony_elixir, :linear_client_module, FailingLinearClient)
+
+    previous_snapshot = %{
+      gated: [%{identifier: "ABC-OLD"}],
+      out_of_scope: [%{identifier: "ABC-SCOPE"}],
+      evaluated_at: ~U[2026-08-02 17:00:00Z],
+      error: nil
+    }
+
+    updated_state = Orchestrator.maybe_dispatch_for_test(state(%{maturity_gate_snapshot: previous_snapshot}))
+
+    assert updated_state.maturity_gate_snapshot.gated == []
+    assert updated_state.maturity_gate_snapshot.out_of_scope == []
+    assert updated_state.maturity_gate_snapshot.evaluated_at == nil
+    assert updated_state.maturity_gate_snapshot.error =~ "rate_limited"
   end
 
   test "logs gated maturity decisions with blocker context and suppresses unchanged repeats" do

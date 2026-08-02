@@ -455,6 +455,16 @@ pre,
   font-weight: 600;
 }
 
+.gate-error {
+  margin: 1rem 0 0;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid #f6d3cf;
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
 .gate-subsection {
   margin-top: 1.1rem;
 }

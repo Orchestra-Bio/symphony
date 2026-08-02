@@ -155,6 +155,7 @@ defmodule SymphonyElixirWeb.Presenter do
   defp maturity_gate_payload(%{} = snapshot) do
     %{
       evaluated_at: iso8601(Map.get(snapshot, :evaluated_at)),
+      error: maturity_gate_error(Map.get(snapshot, :error)),
       config: maturity_gate_config_payload(Map.get(snapshot, :config, %{})),
       gated: Enum.map(Map.get(snapshot, :gated, []), &maturity_gate_issue_payload/1),
       out_of_scope: Enum.map(Map.get(snapshot, :out_of_scope, []), &maturity_gate_issue_payload/1)
@@ -164,6 +165,7 @@ defmodule SymphonyElixirWeb.Presenter do
   defp maturity_gate_payload(_snapshot) do
     %{
       evaluated_at: nil,
+      error: nil,
       config: maturity_gate_config_payload(%{}),
       gated: [],
       out_of_scope: []
@@ -178,6 +180,12 @@ defmodule SymphonyElixirWeb.Presenter do
       terminal_states: string_list(Map.get(config, :terminal_states, []))
     }
   end
+
+  defp maturity_gate_error(error) when is_binary(error) do
+    if String.trim(error) == "", do: nil, else: error
+  end
+
+  defp maturity_gate_error(_error), do: nil
 
   defp maturity_gate_issue_payload(entry) when is_map(entry) do
     %{
