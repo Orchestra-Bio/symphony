@@ -29,6 +29,7 @@ defmodule SymphonyElixir.Orchestrator do
   @failure_retry_base_ms 10_000
   @daemon_max_retry_attempts 3
   @daemon_state_history_limit 8
+  @dispatch_observability_log_ttl_ms 4 * 60 * 60 * 1_000
   # Slightly above the dashboard render interval so "checking now…" can render.
   @poll_transition_render_delay_ms 20
   @empty_codex_totals %{
@@ -1086,13 +1087,23 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp maybe_log_cached_for_issue(%State{} = state, field, issue_id, logs)
        when field in [:maturity_gate_log_decisions, :dispatch_rejections] and is_binary(issue_id) do
-    if Map.get(Map.fetch!(state, field), issue_id) == logs do
+    cache = Map.fetch!(state, field)
+    now_ms = System.monotonic_time(:millisecond)
+
+    if cached_dispatch_log_fresh?(Map.get(cache, issue_id), logs, now_ms) do
       state
     else
       Enum.each(List.wrap(logs), fn {level, message} -> Logger.log(level, message) end)
-      update_in(state, [Access.key(field)], &Map.put(&1, issue_id, logs))
+      update_in(state, [Access.key(field)], &Map.put(&1, issue_id, %{logs: logs, logged_at_ms: now_ms}))
     end
   end
+
+  defp cached_dispatch_log_fresh?(%{logs: cached_logs, logged_at_ms: logged_at_ms}, logs, now_ms)
+       when is_integer(logged_at_ms) do
+    cached_logs == logs and now_ms - logged_at_ms < @dispatch_observability_log_ttl_ms
+  end
+
+  defp cached_dispatch_log_fresh?(_cached, _logs, _now_ms), do: false
 
   defp dispatch_rejection_log(%Issue{} = issue, reason, details) do
     {:info,
