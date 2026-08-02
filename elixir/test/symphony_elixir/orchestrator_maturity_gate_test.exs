@@ -324,6 +324,63 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
              end)
   end
 
+  test "todo dependent with mature waiting-for-ci blocker is dispatch-eligible" do
+    write_maturity_workflow!(maturity_gate_state_scope: ["Todo", "Active"])
+
+    mature_blocker = blocker(id: "blocker-mature", state: "Waiting for CI", labels: ["mature"])
+    immature_blocker = %{mature_blocker | labels: []}
+
+    assert Orchestrator.should_dispatch_issue_for_test(
+             issue(id: "todo-mature-waiting", state: "Todo", blocked_by: [mature_blocker]),
+             state()
+           )
+
+    refute Orchestrator.should_dispatch_issue_for_test(
+             issue(id: "todo-immature-waiting", state: "Todo", blocked_by: [immature_blocker]),
+             state()
+           )
+  end
+
+  test "fan-out retry releases immature dependent and removes pre-session stale workspace" do
+    workspace_root =
+      Path.join(System.tmp_dir!(), "symphony-maturity-fanout-#{System.unique_integer([:positive])}")
+
+    on_exit(fn -> File.rm_rf(workspace_root) end)
+
+    write_maturity_workflow!(workspace_root: workspace_root)
+
+    issue_id = "fanout-dependent"
+    issue_identifier = "ABC-FANOUT"
+    stale_workspace = Path.join(workspace_root, issue_identifier)
+    File.mkdir_p!(stale_workspace)
+    File.write!(Path.join(stale_workspace, "partial-clone"), "partial")
+
+    immature_blocker = blocker(id: "blocker-fanout", state: "Waiting for CI", labels: [])
+    mature_blocker = %{immature_blocker | labels: ["mature"]}
+    immature = issue(id: issue_id, identifier: issue_identifier, blocked_by: [immature_blocker])
+    mature = %{immature | blocked_by: [mature_blocker]}
+
+    claimed_state =
+      state(%{
+        claimed: MapSet.new([issue_id]),
+        retry_attempts: %{issue_id => %{attempt: 1}}
+      })
+
+    released =
+      Orchestrator.handle_retry_issue_lookup_for_test(immature, claimed_state, issue_id, 1, %{
+        identifier: issue_identifier,
+        issue_url: immature.url,
+        error: "workspace hook timed out",
+        worker_host: nil,
+        workspace_path: nil
+      })
+
+    refute MapSet.member?(released.claimed, issue_id)
+    refute Map.has_key?(released.retry_attempts, issue_id)
+    refute File.exists?(stale_workspace)
+    assert Orchestrator.should_dispatch_issue_for_test(mature, released)
+  end
+
   test "regression advisory is emitted once per observed transition without killing the worker" do
     issue_id = "running-dependent"
     blocker_mature = blocker(id: "blocker", identifier: "ABC-BLOCKER", state: "In Review", labels: ["mature"])
@@ -368,6 +425,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
   defp write_maturity_workflow!(opts \\ []) do
     maturity_labels = Keyword.get(opts, :maturity_labels, ["mature"])
     maturity_gate_state_scope = Keyword.get(opts, :maturity_gate_state_scope, ["todo"])
+    workspace_root = Keyword.get(opts, :workspace_root, Path.join(System.tmp_dir!(), "symphony_workspaces"))
 
     workflow = """
     ---
@@ -380,6 +438,8 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
       daemon_default_wake: "1h"
       maturity_labels: #{yaml_value(maturity_labels)}
       maturity_gate_state_scope: #{yaml_value(maturity_gate_state_scope)}
+    workspace:
+      root: #{yaml_value(workspace_root)}
     agent:
       max_concurrent_agents: 3
     ---
@@ -463,4 +523,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
   defp yaml_value(values) when is_list(values) do
     "[" <> Enum.map_join(values, ", ", &inspect/1) <> "]"
   end
+
+  defp yaml_value(value) when is_binary(value), do: inspect(value)
 end

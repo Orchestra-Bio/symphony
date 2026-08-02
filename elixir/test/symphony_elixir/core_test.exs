@@ -901,16 +901,6 @@ defmodule SymphonyElixir.CoreTest do
   test "normal worker exit schedules active-state continuation retry" do
     issue_id = "issue-resume"
     ref = make_ref()
-    orchestrator_name = Module.concat(__MODULE__, :ContinuationOrchestrator)
-    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
-
-    on_exit(fn ->
-      if Process.alive?(pid) do
-        Process.exit(pid, :normal)
-      end
-    end)
-
-    initial_state = :sys.get_state(pid)
 
     running_entry = %{
       pid: self(),
@@ -920,22 +910,23 @@ defmodule SymphonyElixir.CoreTest do
       started_at: DateTime.utc_now()
     }
 
-    :sys.replace_state(pid, fn _ ->
-      initial_state
-      |> Map.put(:running, %{issue_id => running_entry})
-      |> Map.put(:claimed, MapSet.new([issue_id]))
-      |> Map.put(:retry_attempts, %{})
-    end)
+    state = %Orchestrator.State{
+      running: %{issue_id => running_entry},
+      claimed: MapSet.new([issue_id]),
+      retry_attempts: %{},
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0}
+    }
 
-    send(pid, {:DOWN, ref, :process, self(), :normal})
-    Process.sleep(50)
-    state = :sys.get_state(pid)
+    retry_requested_at_ms = System.monotonic_time(:millisecond)
+    assert {:noreply, state} = Orchestrator.handle_info({:DOWN, ref, :process, self(), :normal}, state)
 
     refute Map.has_key?(state.running, issue_id)
     assert MapSet.member?(state.completed, issue_id)
-    assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
+    assert %{attempt: 1, due_at_ms: due_at_ms, timer_ref: timer_ref} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 500, 1_100)
+    assert due_at_ms - retry_requested_at_ms >= 1_000
+    assert due_at_ms - retry_requested_at_ms <= 1_500
+    Process.cancel_timer(timer_ref)
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -1019,22 +1010,11 @@ defmodule SymphonyElixir.CoreTest do
 
   test "stale retry timer messages do not consume newer retry entries" do
     issue_id = "issue-stale-retry"
-    orchestrator_name = Module.concat(__MODULE__, :StaleRetryOrchestrator)
-    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
-
-    on_exit(fn ->
-      if Process.alive?(pid) do
-        Process.exit(pid, :normal)
-      end
-    end)
-
-    initial_state = :sys.get_state(pid)
     current_retry_token = make_ref()
     stale_retry_token = make_ref()
 
-    :sys.replace_state(pid, fn _ ->
-      initial_state
-      |> Map.put(:retry_attempts, %{
+    state = %Orchestrator.State{
+      retry_attempts: %{
         issue_id => %{
           attempt: 2,
           timer_ref: nil,
@@ -1043,18 +1023,18 @@ defmodule SymphonyElixir.CoreTest do
           identifier: "MT-561",
           error: "agent exited: :boom"
         }
-      })
-    end)
+      }
+    }
 
-    send(pid, {:retry_issue, issue_id, stale_retry_token})
-    Process.sleep(50)
+    assert {:noreply, updated_state} =
+             Orchestrator.handle_info({:retry_issue, issue_id, stale_retry_token}, state)
 
     assert %{
              attempt: 2,
              retry_token: ^current_retry_token,
              identifier: "MT-561",
              error: "agent exited: :boom"
-           } = :sys.get_state(pid).retry_attempts[issue_id]
+           } = updated_state.retry_attempts[issue_id]
   end
 
   test "manual refresh coalesces repeated requests and ignores superseded ticks" do
