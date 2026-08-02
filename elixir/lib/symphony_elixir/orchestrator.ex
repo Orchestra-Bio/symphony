@@ -1849,11 +1849,13 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp retry_dispatch_status(%Issue{} = issue, terminal_states) do
+    context = dispatch_context(Config.settings!(), active_state_set(), terminal_states)
+
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
         :terminal
 
-      !candidate_issue?(issue, active_state_set(), terminal_states) ->
+      !candidate_issue?(issue, context) ->
         :not_candidate
 
       maturity_gate_allows?(issue, terminal_states) ->
