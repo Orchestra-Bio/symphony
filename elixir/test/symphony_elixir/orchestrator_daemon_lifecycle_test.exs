@@ -100,7 +100,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
         state: "Legacy Evaluating"
       })
 
-    assert Orchestrator.should_dispatch_issue_for_test(recovery_issue, state())
+    assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(recovery_issue, state())
   end
 
   test "daemon dispatch occupancy uses per-state running counts" do
@@ -134,8 +134,8 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
         }
       })
 
-    refute Orchestrator.should_dispatch_issue_for_test(evaluating_candidate, state)
-    assert Orchestrator.should_dispatch_issue_for_test(todo_candidate, state)
+    assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(evaluating_candidate, state)
+    assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(todo_candidate, state)
   end
 
   test "normal tickets without daemon config behave as before" do
@@ -149,7 +149,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
         blocked_by: [%{id: "blocker-done", identifier: "ABC-288-DONE", state: "Done"}]
       })
 
-    assert Orchestrator.should_dispatch_issue_for_test(active_issue, state())
+    assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(active_issue, state())
 
     assert {:ok, [^active_issue]} =
              Orchestrator.append_due_daemon_candidates_for_test(

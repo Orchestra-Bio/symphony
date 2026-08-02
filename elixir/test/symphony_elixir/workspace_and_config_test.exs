@@ -525,7 +525,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       blocked_by: [%{id: "blocker-1", identifier: "MT-1002", state: "In Progress"}]
     }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+    assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(issue, state)
   end
 
   test "issue assigned to another worker is not dispatch-eligible" do
@@ -547,7 +547,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assigned_to_worker: false
     }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
+    assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(issue, state)
   end
 
   test "issue without every required label is not dispatch-eligible" do
@@ -571,8 +571,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       labels: ["symphony"]
     }
 
-    refute Orchestrator.should_dispatch_issue_for_test(issue, state)
-    assert Orchestrator.should_dispatch_issue_for_test(%{issue | labels: ["Symphony", "JavaScript"]}, state)
+    assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(issue, state)
+    assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(%{issue | labels: ["Symphony", "JavaScript"]}, state)
   end
 
   test "todo issue with terminal blockers remains dispatch-eligible" do
@@ -592,7 +592,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       blocked_by: [%{id: "blocker-2", identifier: "MT-1004", state: "Closed"}]
     }
 
-    assert Orchestrator.should_dispatch_issue_for_test(issue, state)
+    assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(issue, state)
   end
 
   test "dispatch revalidation skips stale todo issue once a non-terminal blocker appears" do
