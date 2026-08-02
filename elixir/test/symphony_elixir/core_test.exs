@@ -1019,22 +1019,11 @@ defmodule SymphonyElixir.CoreTest do
 
   test "stale retry timer messages do not consume newer retry entries" do
     issue_id = "issue-stale-retry"
-    orchestrator_name = Module.concat(__MODULE__, :StaleRetryOrchestrator)
-    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
-
-    on_exit(fn ->
-      if Process.alive?(pid) do
-        Process.exit(pid, :normal)
-      end
-    end)
-
-    initial_state = :sys.get_state(pid)
     current_retry_token = make_ref()
     stale_retry_token = make_ref()
 
-    :sys.replace_state(pid, fn _ ->
-      initial_state
-      |> Map.put(:retry_attempts, %{
+    state = %Orchestrator.State{
+      retry_attempts: %{
         issue_id => %{
           attempt: 2,
           timer_ref: nil,
@@ -1043,18 +1032,18 @@ defmodule SymphonyElixir.CoreTest do
           identifier: "MT-561",
           error: "agent exited: :boom"
         }
-      })
-    end)
+      }
+    }
 
-    send(pid, {:retry_issue, issue_id, stale_retry_token})
-    Process.sleep(50)
+    assert {:noreply, updated_state} =
+             Orchestrator.handle_info({:retry_issue, issue_id, stale_retry_token}, state)
 
     assert %{
              attempt: 2,
              retry_token: ^current_retry_token,
              identifier: "MT-561",
              error: "agent exited: :boom"
-           } = :sys.get_state(pid).retry_attempts[issue_id]
+           } = updated_state.retry_attempts[issue_id]
   end
 
   test "manual refresh coalesces repeated requests and ignores superseded ticks" do
