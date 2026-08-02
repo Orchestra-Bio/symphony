@@ -115,70 +115,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <section class="section-card">
           <div class="section-header">
             <div>
-              <h2 class="section-title">Rate limits</h2>
-              <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
-            </div>
-          </div>
-
-          <pre class="code-panel"><%= pretty_value(@payload.rate_limits) %></pre>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Maturity gate</h2>
-              <p class="section-copy">Dependency-blocked candidate issues from the latest gate evaluation.</p>
-            </div>
-            <span :if={@payload.maturity_gate.evaluated_at} class="muted mono">
-              <%= format_snapshot_time(@payload.maturity_gate.evaluated_at, @now) %>
-            </span>
-          </div>
-
-          <p :if={@payload.maturity_gate.error} class="gate-error">
-            Latest gate evaluation unavailable: <%= @payload.maturity_gate.error %>
-          </p>
-
-          <div class="config-grid">
-            <div class="config-item">
-              <span class="config-label">maturity_labels</span>
-              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_labels) %></span>
-            </div>
-            <div class="config-item">
-              <span class="config-label">maturity_gate_state_scope</span>
-              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_gate_state_scope) %></span>
-            </div>
-            <div class="config-item">
-              <span class="config-label">daemon_states</span>
-              <span class="config-value"><%= format_list(@payload.maturity_gate.config.daemon_states) %></span>
-            </div>
-            <div class="config-item">
-              <span class="config-label">terminal_states</span>
-              <span class="config-value"><%= format_list(@payload.maturity_gate.config.terminal_states) %></span>
-            </div>
-          </div>
-
-          <div class="gate-subsection">
-            <h3 class="subsection-title">Gated work</h3>
-            <.maturity_gate_table
-              entries={@payload.maturity_gate.gated}
-              blocker_header="Blockers"
-              empty="No candidate issues are currently held by the maturity gate."
-            />
-          </div>
-
-          <div class="gate-subsection">
-            <h3 class="subsection-title">Out of gate scope</h3>
-            <.maturity_gate_table
-              entries={@payload.maturity_gate.out_of_scope}
-              blocker_header="Visible blockers"
-              empty="No blocked candidate issues are bypassing the gate through state scope."
-            />
-          </div>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header">
-            <div>
               <h2 class="section-title">Running sessions</h2>
               <p class="section-copy">Active issues, last known agent activity, and token usage.</p>
             </div>
@@ -263,6 +199,70 @@ defmodule SymphonyElixirWeb.DashboardLive do
               </table>
             </div>
           <% end %>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Rate limits</h2>
+              <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
+            </div>
+          </div>
+
+          <pre class="code-panel"><%= pretty_value(@payload.rate_limits) %></pre>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
+              <h2 class="section-title">Maturity gate</h2>
+              <p class="section-copy">Dependency-blocked candidate issues from the latest gate evaluation.</p>
+            </div>
+            <span :if={@payload.maturity_gate.evaluated_at} class="muted mono">
+              <%= format_snapshot_time(@payload.maturity_gate.evaluated_at, @now) %>
+            </span>
+          </div>
+
+          <p :if={@payload.maturity_gate.error} class="gate-error">
+            Latest gate evaluation unavailable: <%= @payload.maturity_gate.error %>
+          </p>
+
+          <div class="config-grid">
+            <div class="config-item">
+              <span class="config-label">maturity_labels</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_labels) %></span>
+            </div>
+            <div class="config-item">
+              <span class="config-label">maturity_gate_state_scope</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_gate_state_scope) %></span>
+            </div>
+            <div class="config-item">
+              <span class="config-label">daemon_states</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.daemon_states) %></span>
+            </div>
+            <div class="config-item">
+              <span class="config-label">terminal_states</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.terminal_states) %></span>
+            </div>
+          </div>
+
+          <div class="gate-subsection">
+            <h3 class="subsection-title">Gated work</h3>
+            <.maturity_gate_table
+              entries={@payload.maturity_gate.gated}
+              blocker_header="Blockers"
+              empty="No candidate issues are currently held by the maturity gate."
+            />
+          </div>
+
+          <div class="gate-subsection">
+            <h3 class="subsection-title">Out of gate scope</h3>
+            <.maturity_gate_table
+              entries={@payload.maturity_gate.out_of_scope}
+              blocker_header="Visible blockers"
+              empty="No blocked candidate issues are bypassing the gate through state scope."
+            />
+          </div>
         </section>
 
         <section class="section-card">
