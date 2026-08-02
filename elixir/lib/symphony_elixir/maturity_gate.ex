@@ -5,7 +5,7 @@ defmodule SymphonyElixir.MaturityGate do
 
   alias SymphonyElixir.Linear.Issue
 
-  defstruct status: :eligible, blockers: [], warnings: []
+  defstruct status: :eligible, scope: :in_scope, blockers: [], warnings: []
 
   @type warning :: {:daemon_blocker_ignored, Issue.blocker_ref()}
   @type config :: %{
@@ -16,6 +16,7 @@ defmodule SymphonyElixir.MaturityGate do
         }
   @type t :: %__MODULE__{
           status: :eligible | :gated,
+          scope: :in_scope | :out_of_scope,
           blockers: [Issue.blocker_ref()],
           warnings: [warning()]
         }
@@ -25,7 +26,7 @@ defmodule SymphonyElixir.MaturityGate do
   def evaluate(%Issue{} = issue, %{} = config) do
     case issue_in_scope?(issue, config) do
       true -> scoped_decision(issue, config)
-      false -> %__MODULE__{}
+      false -> %__MODULE__{scope: :out_of_scope}
     end
   end
 
