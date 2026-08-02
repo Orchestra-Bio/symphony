@@ -148,6 +148,113 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
            ] = updated_state.maturity_gate_decisions.gated
   end
 
+  test "logs gated maturity decisions with blocker context and suppresses unchanged repeats" do
+    gated_issue =
+      issue(
+        id: "gated-dependent",
+        identifier: "ABC-GATED",
+        blocked_by: [
+          blocker(id: "immature-blocker", identifier: "ABC-BLOCKER", state: "In Review", labels: ["needs-review"])
+        ]
+      )
+
+    log =
+      capture_log(fn ->
+        {false, updated_state} = Orchestrator.evaluate_dispatch_issue_for_test(gated_issue, state())
+        {false, _unchanged_state} = Orchestrator.evaluate_dispatch_issue_for_test(gated_issue, updated_state)
+      end)
+
+    assert log =~ "Maturity gate rejected dispatch"
+    assert log =~ "issue_identifier=ABC-GATED"
+    assert log =~ "dependent_state=\"Todo\""
+    assert log =~ "identifier=ABC-BLOCKER"
+    assert log =~ "state=In Review"
+    assert log =~ "labels=[\"needs-review\"]"
+    assert log =~ "maturity_labels=[\"mature\"]"
+    assert log =~ "maturity_gate_state_scope=[\"todo\"]"
+    assert log =~ "daemon_states=[\"happy\", \"unhappy\"]"
+    assert log =~ "terminal_states="
+    assert length(String.split(log, "Maturity gate rejected dispatch")) == 2
+  end
+
+  test "logs out-of-scope maturity gate decisions without gating dispatch" do
+    out_of_scope_issue =
+      issue(
+        id: "progress-dependent",
+        identifier: "ABC-PROGRESS",
+        state: "In Progress",
+        blocked_by: [blocker(id: "immature-blocker", state: "In Review")]
+      )
+
+    log =
+      capture_log(fn ->
+        assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(out_of_scope_issue, state())
+      end)
+
+    assert log =~ "Maturity gate skipped; issue out of gate scope"
+    assert log =~ "issue_identifier=ABC-PROGRESS"
+    assert log =~ "dependent_state=\"In Progress\""
+    assert log =~ "maturity_gate_state_scope=[\"todo\"]"
+    refute log =~ "Maturity gate rejected dispatch"
+  end
+
+  test "logs slot exhaustion as dispatch rejection, not a gate decision" do
+    running_issue = issue(id: "running-slot", identifier: "ABC-RUNNING")
+    agent_pid = sleeping_process()
+
+    exhausted_state =
+      state(%{
+        max_concurrent_agents: 1,
+        running: %{running_issue.id => running_entry(running_issue, agent_pid)}
+      })
+
+    slot_candidate = issue(id: "slot-dependent", identifier: "ABC-SLOT")
+
+    log =
+      capture_log(fn ->
+        assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(slot_candidate, exhausted_state)
+      end)
+
+    assert log =~ "Dispatch candidate rejected"
+    assert log =~ "reason=slot_exhausted"
+    assert log =~ "global"
+    refute log =~ "Maturity gate rejected dispatch"
+
+    send(agent_pid, :stop)
+  end
+
+  test "logs already claimed running and blocked dispatch rejections distinctly" do
+    base_issue = issue(id: "already-dependent", identifier: "ABC-ALREADY")
+    agent_pid = sleeping_process()
+
+    log =
+      capture_log(fn ->
+        assert {false, _state} =
+                 Orchestrator.evaluate_dispatch_issue_for_test(
+                   base_issue,
+                   state(%{claimed: MapSet.new([base_issue.id])})
+                 )
+
+        assert {false, _state} =
+                 Orchestrator.evaluate_dispatch_issue_for_test(
+                   base_issue,
+                   state(%{running: %{base_issue.id => running_entry(base_issue, agent_pid)}})
+                 )
+
+        assert {false, _state} =
+                 Orchestrator.evaluate_dispatch_issue_for_test(
+                   base_issue,
+                   state(%{blocked: %{base_issue.id => %{error: "codex turn requires operator input"}}})
+                 )
+      end)
+
+    assert log =~ "reason=already_claimed"
+    assert log =~ "reason=already_running"
+    assert log =~ "reason=already_blocked"
+
+    send(agent_pid, :stop)
+  end
+
   test "retry lookup uses the shared maturity gate" do
     issue_id = "retry-dependent"
     immature = issue(id: issue_id, identifier: "ABC-RETRY", blocked_by: [blocker(state: "In Review")])
