@@ -1369,17 +1369,23 @@ defmodule SymphonyElixir.Orchestrator do
   defp handle_retry_issue_lookup(%Issue{} = issue, state, issue_id, attempt, metadata) do
     terminal_states = terminal_state_set()
 
-    cond do
-      terminal_issue_state?(issue.state, terminal_states) ->
+    case retry_dispatch_status(issue, terminal_states) do
+      :terminal ->
         Logger.info("Issue state is terminal: issue_id=#{issue_id} issue_identifier=#{issue.identifier} state=#{issue.state}; removing associated workspace")
 
         cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
         {:noreply, release_issue_claim(state, issue_id)}
 
-      retry_candidate_issue?(issue, terminal_states) ->
+      :dispatchable ->
         handle_active_retry(state, issue, attempt, metadata)
 
-      true ->
+      :maturity_gated ->
+        Logger.debug("Issue maturity-gated during retry, releasing claim for future poll issue_id=#{issue_id} issue_identifier=#{issue.identifier}")
+        cleanup_pre_session_retry_workspace(issue, metadata)
+
+        {:noreply, release_issue_claim(state, issue_id)}
+
+      :not_candidate ->
         Logger.debug("Issue left active states, removing claim issue_id=#{issue_id} issue_identifier=#{issue.identifier}")
 
         {:noreply, release_issue_claim(state, issue_id)}
@@ -1390,6 +1396,37 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.debug("Issue no longer visible, removing claim issue_id=#{issue_id}")
     {:noreply, release_issue_claim(state, issue_id)}
   end
+
+  defp retry_dispatch_status(%Issue{} = issue, terminal_states) do
+    cond do
+      terminal_issue_state?(issue.state, terminal_states) ->
+        :terminal
+
+      !candidate_issue?(issue, active_state_set(), terminal_states) ->
+        :not_candidate
+
+      maturity_gate_allows?(issue, terminal_states) ->
+        :dispatchable
+
+      true ->
+        :maturity_gated
+    end
+  end
+
+  defp cleanup_pre_session_retry_workspace(%Issue{} = issue, metadata) when is_map(metadata) do
+    if !retry_workspace_started?(metadata) do
+      Logger.info("Removing pre-session retry workspace for maturity-gated issue: #{issue_context(issue)}")
+      cleanup_issue_workspace(issue.identifier, metadata[:worker_host])
+    end
+  end
+
+  defp cleanup_pre_session_retry_workspace(_issue, _metadata), do: :ok
+
+  defp retry_workspace_started?(%{workspace_path: workspace_path}) when is_binary(workspace_path) do
+    String.trim(workspace_path) != ""
+  end
+
+  defp retry_workspace_started?(_metadata), do: false
 
   defp cleanup_issue_workspace(identifier, worker_host \\ nil)
 
