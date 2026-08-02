@@ -290,8 +290,6 @@ defmodule SymphonyElixirWeb.Presenter do
     |> Enum.join("; ")
   end
 
-  defp maturity_gate_reason_text(_reasons), do: "n/a"
-
   defp maturity_gate_reason_part("not_terminal"), do: "not terminal"
   defp maturity_gate_reason_part("missing_maturity_label"), do: "missing maturity label"
   defp maturity_gate_reason_part(reason) when is_binary(reason), do: reason
