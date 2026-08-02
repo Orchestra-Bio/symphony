@@ -88,6 +88,40 @@ defmodule SymphonyElixir.MaturityGateTest do
     assert MaturityGate.result(gated) == {:gated, [immature_blocker]}
   end
 
+  test "decisions explain satisfied, gating, ignored, and out-of-scope blockers" do
+    terminal_blocker = blocker(id: "done", identifier: "ABC-DONE", state: "Done")
+    mature_blocker = blocker(id: "mature", identifier: "ABC-MATURE", state: "In Review", labels: ["mature"])
+    immature_blocker = blocker(id: "immature", identifier: "ABC-IMMATURE", state: "In Review")
+    daemon_blocker = blocker(id: "daemon", identifier: "ABC-DAEMON", state: "Happy")
+
+    decision =
+      MaturityGate.evaluate(
+        issue(blocked_by: [terminal_blocker, mature_blocker, immature_blocker, daemon_blocker]),
+        config()
+      )
+
+    assert decision.status == :gated
+    assert decision.scope == :in_scope
+    assert decision.blockers == [immature_blocker]
+
+    assert Enum.map(decision.blocker_decisions, &{&1.blocker.identifier, &1.status, &1.reasons}) == [
+             {"ABC-DONE", :satisfied, [:terminal]},
+             {"ABC-MATURE", :satisfied, [:maturity_label]},
+             {"ABC-IMMATURE", :gating, [:not_terminal, :missing_maturity_label]},
+             {"ABC-DAEMON", :ignored, [:daemon_state]}
+           ]
+
+    out_of_scope =
+      MaturityGate.evaluate(
+        issue(state: "In Progress", blocked_by: [immature_blocker]),
+        config()
+      )
+
+    assert out_of_scope.status == :eligible
+    assert out_of_scope.scope == :out_of_scope
+    assert [%{status: :out_of_scope, reasons: [:out_of_gate_scope]}] = out_of_scope.blocker_decisions
+  end
+
   test "unknown blockers remain gated" do
     unknown_blocker = %{id: nil, identifier: "", state: nil, labels: nil}
 

@@ -22,7 +22,8 @@ defmodule SymphonyElixirWeb.Presenter do
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           blocked: Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1),
           codex_totals: snapshot.codex_totals,
-          rate_limits: snapshot.rate_limits
+          rate_limits: snapshot.rate_limits,
+          maturity_gate: maturity_gate_payload(Map.get(snapshot, :maturity_gate))
         }
 
       :timeout ->
@@ -151,6 +152,68 @@ defmodule SymphonyElixirWeb.Presenter do
     }
   end
 
+  defp maturity_gate_payload(%{} = snapshot) do
+    %{
+      evaluated_at: iso8601(Map.get(snapshot, :evaluated_at)),
+      error: maturity_gate_error(Map.get(snapshot, :error)),
+      config: maturity_gate_config_payload(Map.get(snapshot, :config, %{})),
+      gated: Enum.map(Map.get(snapshot, :gated, []), &maturity_gate_issue_payload/1),
+      out_of_scope: Enum.map(Map.get(snapshot, :out_of_scope, []), &maturity_gate_issue_payload/1)
+    }
+  end
+
+  defp maturity_gate_payload(_snapshot) do
+    %{
+      evaluated_at: nil,
+      error: nil,
+      config: maturity_gate_config_payload(%{}),
+      gated: [],
+      out_of_scope: []
+    }
+  end
+
+  defp maturity_gate_config_payload(config) when is_map(config) do
+    %{
+      maturity_labels: string_list(Map.get(config, :maturity_labels, [])),
+      maturity_gate_state_scope: string_list(Map.get(config, :maturity_gate_state_scope, [])),
+      daemon_states: string_list(Map.get(config, :daemon_states, [])),
+      terminal_states: string_list(Map.get(config, :terminal_states, []))
+    }
+  end
+
+  defp maturity_gate_error(error) when is_binary(error) do
+    if String.trim(error) == "", do: nil, else: error
+  end
+
+  defp maturity_gate_error(_error), do: nil
+
+  defp maturity_gate_issue_payload(entry) when is_map(entry) do
+    %{
+      issue_id: Map.get(entry, :issue_id),
+      issue_identifier: Map.get(entry, :identifier),
+      issue_url: Map.get(entry, :issue_url),
+      title: Map.get(entry, :title),
+      state: Map.get(entry, :state),
+      status: atom_name(Map.get(entry, :status)),
+      scope: atom_name(Map.get(entry, :scope)),
+      blockers: Enum.map(Map.get(entry, :blockers, []), &maturity_gate_blocker_payload/1)
+    }
+  end
+
+  defp maturity_gate_blocker_payload(entry) when is_map(entry) do
+    reasons = atom_names(Map.get(entry, :reasons, []))
+
+    %{
+      id: Map.get(entry, :id),
+      identifier: Map.get(entry, :identifier),
+      state: Map.get(entry, :state),
+      labels: string_list(Map.get(entry, :labels, [])),
+      status: atom_name(Map.get(entry, :status)),
+      reasons: reasons,
+      reason: maturity_gate_reason_text(reasons)
+    }
+  end
+
   defp running_issue_payload(running) do
     %{
       worker_host: Map.get(running, :worker_host),
@@ -222,6 +285,38 @@ defmodule SymphonyElixirWeb.Presenter do
 
   defp summarize_message(nil), do: nil
   defp summarize_message(message), do: StatusDashboard.humanize_codex_message(message)
+
+  defp maturity_gate_reason_text(["out_of_gate_scope"]), do: "dependent state is out of gate scope"
+  defp maturity_gate_reason_text(["terminal"]), do: "terminal"
+  defp maturity_gate_reason_text(["maturity_label"]), do: "carries a maturity label"
+  defp maturity_gate_reason_text(["daemon_state"]), do: "ignored as a daemon-state blocker"
+
+  defp maturity_gate_reason_text(reasons) when is_list(reasons) do
+    reasons
+    |> Enum.map(&maturity_gate_reason_part/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("; ")
+  end
+
+  defp maturity_gate_reason_part("not_terminal"), do: "not terminal"
+  defp maturity_gate_reason_part("missing_maturity_label"), do: "missing maturity label"
+  defp maturity_gate_reason_part(reason) when is_binary(reason), do: reason
+  defp maturity_gate_reason_part(_reason), do: ""
+
+  defp string_list(values) when is_list(values) do
+    values
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp string_list(_values), do: []
+
+  defp atom_names(values) when is_list(values), do: Enum.map(values, &atom_name/1)
+  defp atom_names(_values), do: []
+
+  defp atom_name(value) when is_atom(value), do: Atom.to_string(value)
+  defp atom_name(value) when is_binary(value), do: value
+  defp atom_name(_value), do: nil
 
   defp due_at_iso8601(due_in_ms) when is_integer(due_in_ms) do
     DateTime.utc_now()

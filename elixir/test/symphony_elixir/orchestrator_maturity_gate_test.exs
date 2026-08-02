@@ -1,6 +1,15 @@
 defmodule SymphonyElixir.OrchestratorMaturityGateTest do
   use SymphonyElixir.TestSupport
 
+  defmodule FailingLinearClient do
+    def fetch_candidate_issues, do: {:error, :rate_limited}
+    def fetch_issues_by_states(_states), do: {:ok, []}
+    def fetch_issue_states_by_ids(_issue_ids), do: {:ok, []}
+    def fetch_issue_state_history(_issue_id, _limit), do: {:ok, []}
+    def fetch_comment_body(_comment_id), do: {:error, :comment_not_found}
+    def graphql(_query, _variables), do: {:error, :not_implemented}
+  end
+
   setup do
     write_maturity_workflow!()
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
@@ -11,20 +20,23 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     immature_blocker = blocker(id: "blocker-immature", state: "In Review")
     mature_blocker = %{immature_blocker | labels: ["mature"]}
 
-    refute Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "todo-gated", state: "Todo", blocked_by: [immature_blocker]),
-             state()
-           )
+    assert {false, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "todo-gated", state: "Todo", blocked_by: [immature_blocker]),
+               state()
+             )
 
-    assert Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "todo-mature", state: "Todo", blocked_by: [mature_blocker]),
-             state()
-           )
+    assert {true, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "todo-mature", state: "Todo", blocked_by: [mature_blocker]),
+               state()
+             )
 
-    assert Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "progress-default-scope", state: "In Progress", blocked_by: [immature_blocker]),
-             state()
-           )
+    assert {true, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "progress-default-scope", state: "In Progress", blocked_by: [immature_blocker]),
+               state()
+             )
   end
 
   test "candidate selection gates explicitly widened states" do
@@ -33,15 +45,17 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     immature_blocker = blocker(id: "blocker-immature", state: "In Review")
     mature_blocker = %{immature_blocker | labels: ["mature"]}
 
-    refute Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "progress-gated", state: "In Progress", blocked_by: [immature_blocker]),
-             state()
-           )
+    assert {false, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "progress-gated", state: "In Progress", blocked_by: [immature_blocker]),
+               state()
+             )
 
-    assert Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "progress-mature", state: "In Progress", blocked_by: [mature_blocker]),
-             state()
-           )
+    assert {true, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "progress-mature", state: "In Progress", blocked_by: [mature_blocker]),
+               state()
+             )
   end
 
   test "candidate selection ignores daemon-state blockers with a warning" do
@@ -49,14 +63,128 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
 
     log =
       capture_log(fn ->
-        assert Orchestrator.should_dispatch_issue_for_test(
-                 issue(id: "daemon-dependent", blocked_by: [daemon_blocker]),
-                 state()
-               )
+        assert {true, _state} =
+                 Orchestrator.evaluate_dispatch_issue_for_test(
+                   issue(id: "daemon-dependent", blocked_by: [daemon_blocker]),
+                   state()
+                 )
       end)
 
     assert log =~ "Ignoring daemon-state blocker in maturity gate"
     assert log =~ "ABC-DAEMON"
+  end
+
+  test "maturity gate snapshot exposes config, gated blockers, and out-of-scope ungated work" do
+    terminal_blocker = blocker(id: "blocker-done", identifier: "ABC-DONE", state: "Done")
+    mature_blocker = blocker(id: "blocker-mature", identifier: "ABC-MATURE", state: "In Review", labels: ["mature"])
+    immature_blocker = blocker(id: "blocker-immature", identifier: "ABC-IMMATURE", state: "In Review")
+    daemon_blocker = blocker(id: "blocker-daemon", identifier: "ABC-DAEMON", state: "Happy")
+
+    gated_issue =
+      issue(
+        id: "gated-dependent",
+        identifier: "ABC-GATED",
+        title: "Gated dependent",
+        state: "Todo",
+        blocked_by: [terminal_blocker, mature_blocker, immature_blocker, daemon_blocker]
+      )
+
+    out_of_scope_issue =
+      issue(
+        id: "out-of-scope-dependent",
+        identifier: "ABC-OUT",
+        title: "Out of scope dependent",
+        state: "In Progress",
+        blocked_by: [immature_blocker]
+      )
+
+    snapshot = Orchestrator.maturity_gate_snapshot_for_test([gated_issue, out_of_scope_issue], state())
+
+    assert snapshot.config == %{
+             terminal_states: ["canceled", "done"],
+             daemon_states: ["happy", "unhappy"],
+             maturity_labels: ["mature"],
+             maturity_gate_state_scope: ["todo"]
+           }
+
+    assert %DateTime{} = snapshot.evaluated_at
+
+    assert [
+             %{
+               identifier: "ABC-GATED",
+               title: "Gated dependent",
+               state: "Todo",
+               status: :gated,
+               scope: :in_scope,
+               blockers: gated_blockers
+             }
+           ] = snapshot.gated
+
+    assert Enum.map(gated_blockers, &{&1.identifier, &1.status, &1.reasons}) == [
+             {"ABC-DONE", :satisfied, [:terminal]},
+             {"ABC-MATURE", :satisfied, [:maturity_label]},
+             {"ABC-IMMATURE", :gating, [:not_terminal, :missing_maturity_label]},
+             {"ABC-DAEMON", :ignored, [:daemon_state]}
+           ]
+
+    assert [
+             %{
+               identifier: "ABC-OUT",
+               title: "Out of scope dependent",
+               state: "In Progress",
+               status: :eligible,
+               scope: :out_of_scope,
+               blockers: [%{identifier: "ABC-IMMATURE", status: :out_of_scope, reasons: [:out_of_gate_scope]}]
+             }
+           ] = snapshot.out_of_scope
+  end
+
+  test "poll updates maturity gate snapshot even when dispatch slots are full" do
+    gated_issue =
+      issue(
+        id: "gated-dependent",
+        identifier: "ABC-GATED",
+        title: "Gated dependent",
+        state: "Todo",
+        blocked_by: [blocker(id: "blocker-immature", identifier: "ABC-IMMATURE", state: "In Review")]
+      )
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [gated_issue])
+
+    updated_state = Orchestrator.maybe_dispatch_for_test(state(%{max_concurrent_agents: 0}))
+
+    assert %DateTime{} = updated_state.maturity_gate_snapshot.evaluated_at
+
+    assert [
+             %{
+               identifier: "ABC-GATED",
+               blockers: [%{identifier: "ABC-IMMATURE", status: :gating}]
+             }
+           ] = updated_state.maturity_gate_snapshot.gated
+  end
+
+  test "poll clears maturity gate snapshot when candidate fetch fails" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "linear",
+      tracker_api_token: "token",
+      tracker_project_slug: "project"
+    )
+
+    Application.put_env(:symphony_elixir, :linear_client_module, FailingLinearClient)
+
+    previous_snapshot = %{
+      gated: [%{identifier: "ABC-OLD"}],
+      out_of_scope: [%{identifier: "ABC-SCOPE"}],
+      evaluated_at: ~U[2026-08-02 17:00:00Z],
+      error: nil
+    }
+
+    updated_state = Orchestrator.maybe_dispatch_for_test(state(%{maturity_gate_snapshot: previous_snapshot}))
+
+    assert updated_state.maturity_gate_snapshot.gated == []
+    assert updated_state.maturity_gate_snapshot.out_of_scope == []
+    assert updated_state.maturity_gate_snapshot.evaluated_at == nil
+    assert updated_state.maturity_gate_snapshot.error =~ "rate_limited"
   end
 
   test "logs gated maturity decisions with blocker context and suppresses unchanged repeats" do
@@ -208,15 +336,17 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     mature_blocker = blocker(id: "blocker-mature", state: "Waiting for CI", labels: ["mature"])
     immature_blocker = %{mature_blocker | labels: []}
 
-    assert Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "todo-mature-waiting", state: "Todo", blocked_by: [mature_blocker]),
-             state()
-           )
+    assert {true, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "todo-mature-waiting", state: "Todo", blocked_by: [mature_blocker]),
+               state()
+             )
 
-    refute Orchestrator.should_dispatch_issue_for_test(
-             issue(id: "todo-immature-waiting", state: "Todo", blocked_by: [immature_blocker]),
-             state()
-           )
+    assert {false, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "todo-immature-waiting", state: "Todo", blocked_by: [immature_blocker]),
+               state()
+             )
   end
 
   test "fan-out retry releases immature dependent and removes pre-session stale workspace" do
@@ -256,7 +386,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     refute MapSet.member?(released.claimed, issue_id)
     refute Map.has_key?(released.retry_attempts, issue_id)
     refute File.exists?(stale_workspace)
-    assert Orchestrator.should_dispatch_issue_for_test(mature, released)
+    assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(mature, released)
   end
 
   test "regression advisory is emitted once per observed transition without killing the worker" do
