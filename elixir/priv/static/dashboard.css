@@ -138,10 +138,15 @@ pre,
   gap: 1rem;
 }
 
+.dashboard-shell > * {
+  min-width: 0;
+}
+
 .hero-card,
 .section-card,
 .metric-card,
 .error-card {
+  min-width: 0;
   background: var(--card);
   border: 1px solid rgba(217, 217, 227, 0.82);
   box-shadow: var(--shadow-sm);
@@ -295,6 +300,8 @@ pre,
 
 .table-wrap {
   overflow-x: auto;
+  max-width: 100%;
+  min-width: 0;
   margin-top: 1rem;
 }
 
@@ -333,6 +340,10 @@ pre,
   display: grid;
   gap: 0.24rem;
   min-width: 0;
+}
+
+.issue-stack .state-badge {
+  justify-self: start;
 }
 
 .event-text {
@@ -415,6 +426,117 @@ pre,
   font-size: 0.9rem;
 }
 
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.config-item {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8f8fa;
+}
+
+.config-label {
+  color: var(--muted);
+  font-family: "Sohne Mono", "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 0.76rem;
+}
+
+.config-value {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.gate-subsection {
+  margin-top: 1.1rem;
+}
+
+.subsection-title {
+  margin: 0;
+  font-size: 0.96rem;
+  line-height: 1.2;
+}
+
+.gate-table {
+  min-width: 860px;
+}
+
+.gate-issue-title {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.blocker-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.blocker-row {
+  display: grid;
+  gap: 0.32rem;
+  min-width: 0;
+}
+
+.blocker-main,
+.label-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
+.gate-status-badge,
+.label-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.55rem;
+  padding: 0.24rem 0.52rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.gate-status-satisfied {
+  background: var(--accent-soft);
+  border-color: rgba(16, 163, 127, 0.18);
+  color: var(--accent-ink);
+}
+
+.gate-status-gating {
+  background: var(--danger-soft);
+  border-color: #f6d3cf;
+  color: var(--danger);
+}
+
+.gate-status-ignored,
+.gate-status-out-of-scope {
+  background: #eef4ff;
+  border-color: #c7d7fe;
+  color: #344054;
+}
+
+.label-chip {
+  background: #fff;
+  color: #353740;
+  font-weight: 600;
+}
+
+.gate-reason {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .empty-state {
   margin: 1rem 0 0;
   color: var(--muted);
@@ -467,5 +589,30 @@ pre,
   .error-card {
     border-radius: 20px;
     padding: 1rem;
+  }
+
+  .gate-table {
+    min-width: 0;
+  }
+
+  .gate-table thead {
+    display: none;
+  }
+
+  .gate-table,
+  .gate-table tbody,
+  .gate-table tr,
+  .gate-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .gate-table td {
+    padding: 0.8rem 0 0;
+  }
+
+  .gate-table td + td {
+    padding-top: 0.7rem;
+    border-top: 0;
   }
 }

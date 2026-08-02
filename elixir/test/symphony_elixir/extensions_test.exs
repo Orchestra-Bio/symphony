@@ -467,7 +467,78 @@ defmodule SymphonyElixir.ExtensionsTest do
                "total_tokens" => 12,
                "seconds_running" => 42.5
              },
-             "rate_limits" => %{"primary" => %{"remaining" => 11}}
+             "rate_limits" => %{"primary" => %{"remaining" => 11}},
+             "maturity_gate" => %{
+               "evaluated_at" => "2026-08-02T16:00:00Z",
+               "config" => %{
+                 "maturity_labels" => ["mature"],
+                 "maturity_gate_state_scope" => ["todo"],
+                 "daemon_states" => ["happy", "unhappy"],
+                 "terminal_states" => ["canceled", "done"]
+               },
+               "gated" => [
+                 %{
+                   "issue_id" => "issue-gated",
+                   "issue_identifier" => "MT-GATED",
+                   "issue_url" => "https://example.org/issues/MT-GATED",
+                   "title" => "Gated dependent",
+                   "state" => "Todo",
+                   "status" => "gated",
+                   "scope" => "in_scope",
+                   "blockers" => [
+                     %{
+                       "id" => "blocker-done",
+                       "identifier" => "ABC-DONE",
+                       "state" => "Done",
+                       "labels" => [],
+                       "status" => "satisfied",
+                       "reasons" => ["terminal"],
+                       "reason" => "terminal"
+                     },
+                     %{
+                       "id" => "blocker-immature",
+                       "identifier" => "ABC-IMMATURE",
+                       "state" => "In Review",
+                       "labels" => ["pink"],
+                       "status" => "gating",
+                       "reasons" => ["not_terminal", "missing_maturity_label"],
+                       "reason" => "not terminal; missing maturity label"
+                     },
+                     %{
+                       "id" => "blocker-daemon",
+                       "identifier" => "ABC-DAEMON",
+                       "state" => "Happy",
+                       "labels" => [],
+                       "status" => "ignored",
+                       "reasons" => ["daemon_state"],
+                       "reason" => "ignored as a daemon-state blocker"
+                     }
+                   ]
+                 }
+               ],
+               "out_of_scope" => [
+                 %{
+                   "issue_id" => "issue-out",
+                   "issue_identifier" => "MT-OUT",
+                   "issue_url" => "https://example.org/issues/MT-OUT",
+                   "title" => "Out of scope dependent",
+                   "state" => "In Progress",
+                   "status" => "eligible",
+                   "scope" => "out_of_scope",
+                   "blockers" => [
+                     %{
+                       "id" => "blocker-immature",
+                       "identifier" => "ABC-IMMATURE",
+                       "state" => "In Review",
+                       "labels" => ["pink"],
+                       "status" => "out_of_scope",
+                       "reasons" => ["out_of_gate_scope"],
+                       "reason" => "dependent state is out of gate scope"
+                     }
+                   ]
+                 }
+               ]
+             }
            }
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")
@@ -662,6 +733,14 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ ~s(aria-label="Open MT-HTTP in the issue tracker")
     assert html =~ "rendered"
     assert html =~ "turn blocked: waiting for user input"
+    assert html =~ "Maturity gate"
+    assert html =~ "maturity_labels"
+    assert html =~ "MT-GATED"
+    assert html =~ "Gated dependent"
+    assert html =~ "ABC-IMMATURE"
+    assert html =~ "missing maturity label"
+    assert html =~ "MT-OUT"
+    assert html =~ "dependent state is out of gate scope"
     assert html =~ "Runtime"
     assert html =~ "Live"
     assert html =~ "Offline"
@@ -855,6 +934,73 @@ defmodule SymphonyElixir.ExtensionsTest do
           last_codex_timestamp: DateTime.utc_now()
         }
       ],
+      maturity_gate: %{
+        evaluated_at: ~U[2026-08-02 16:00:00Z],
+        config: %{
+          maturity_labels: ["mature"],
+          maturity_gate_state_scope: ["todo"],
+          daemon_states: ["happy", "unhappy"],
+          terminal_states: ["canceled", "done"]
+        },
+        gated: [
+          %{
+            issue_id: "issue-gated",
+            identifier: "MT-GATED",
+            issue_url: "https://example.org/issues/MT-GATED",
+            title: "Gated dependent",
+            state: "Todo",
+            status: :gated,
+            scope: :in_scope,
+            blockers: [
+              %{
+                id: "blocker-done",
+                identifier: "ABC-DONE",
+                state: "Done",
+                labels: [],
+                status: :satisfied,
+                reasons: [:terminal]
+              },
+              %{
+                id: "blocker-immature",
+                identifier: "ABC-IMMATURE",
+                state: "In Review",
+                labels: ["pink"],
+                status: :gating,
+                reasons: [:not_terminal, :missing_maturity_label]
+              },
+              %{
+                id: "blocker-daemon",
+                identifier: "ABC-DAEMON",
+                state: "Happy",
+                labels: [],
+                status: :ignored,
+                reasons: [:daemon_state]
+              }
+            ]
+          }
+        ],
+        out_of_scope: [
+          %{
+            issue_id: "issue-out",
+            identifier: "MT-OUT",
+            issue_url: "https://example.org/issues/MT-OUT",
+            title: "Out of scope dependent",
+            state: "In Progress",
+            status: :eligible,
+            scope: :out_of_scope,
+            blockers: [
+              %{
+                id: "blocker-immature",
+                identifier: "ABC-IMMATURE",
+                state: "In Review",
+                labels: ["pink"],
+                status: :out_of_scope,
+                reasons: [:out_of_gate_scope]
+              }
+            ]
+          }
+        ]
+      },
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }

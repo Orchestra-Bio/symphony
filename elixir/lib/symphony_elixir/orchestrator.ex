@@ -48,6 +48,7 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       blocked: %{},
       retry_attempts: %{},
+      maturity_gate_decisions: %{gated: [], out_of_scope: [], evaluated_at: nil},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -276,12 +277,20 @@ defmodule SymphonyElixir.Orchestrator do
       |> reconcile_running_issues()
       |> reconcile_blocked_issues()
 
+    active_states = active_state_set()
+    terminal_states = terminal_state_set()
+
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          issues <- ensure_candidate_workpads(issues),
-         {:ok, issues, state} <- append_due_daemon_candidates(issues, state),
-         true <- available_slots(state) > 0 do
-      choose_issues(issues, state)
+         {:ok, issues, state} <- append_due_daemon_candidates(issues, state) do
+      state = record_maturity_gate_decisions(state, issues, active_states, terminal_states)
+
+      if available_slots(state) > 0 do
+        choose_issues(issues, state, active_states, terminal_states)
+      else
+        state
+      end
     else
       {:error, :missing_linear_api_token} ->
         Logger.error("Linear API token missing in WORKFLOW.md")
@@ -319,9 +328,6 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:error, reason} ->
         Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
-        state
-
-      false ->
         state
     end
   end
@@ -405,6 +411,20 @@ defmodule SymphonyElixir.Orchestrator do
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
     should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set())
   end
+
+  @doc false
+  @spec maturity_gate_snapshot_for_test([Issue.t()], term()) :: map()
+  def maturity_gate_snapshot_for_test(issues, %State{} = state) when is_list(issues) do
+    terminal_states = terminal_state_set()
+
+    state
+    |> record_maturity_gate_decisions(issues, active_state_set(), terminal_states)
+    |> maturity_gate_snapshot(terminal_states)
+  end
+
+  @doc false
+  @spec maybe_dispatch_for_test(term()) :: term()
+  def maybe_dispatch_for_test(%State{} = state), do: maybe_dispatch(state)
 
   @doc false
   @spec revalidate_issue_for_dispatch_for_test(Issue.t(), ([String.t()] -> term())) ::
@@ -829,10 +849,7 @@ defmodule SymphonyElixir.Orchestrator do
     }
   end
 
-  defp choose_issues(issues, state) do
-    active_states = active_state_set()
-    terminal_states = terminal_state_set()
-
+  defp choose_issues(issues, state, active_states, terminal_states) do
     issues
     |> sort_issues_for_dispatch()
     |> Enum.reduce(state, fn issue, state_acc ->
@@ -939,10 +956,75 @@ defmodule SymphonyElixir.Orchestrator do
     tracker = Config.settings!().tracker
 
     %{
-      terminal_states: MapSet.to_list(terminal_states),
+      terminal_states: terminal_states |> MapSet.to_list() |> Enum.sort(),
       daemon_states: tracker.daemon_states,
       maturity_labels: tracker.maturity_labels,
       maturity_gate_state_scope: tracker.maturity_gate_state_scope
+    }
+  end
+
+  defp record_maturity_gate_decisions(%State{} = state, issues, active_states, terminal_states) when is_list(issues) do
+    config = maturity_gate_config(terminal_states)
+
+    issue_decisions =
+      issues
+      |> Enum.filter(&candidate_issue?(&1, active_states, terminal_states))
+      |> Enum.map(fn %Issue{} = issue ->
+        %{issue: issue, decision: MaturityGate.evaluate(issue, config)}
+      end)
+
+    %{
+      state
+      | maturity_gate_decisions: %{
+          gated: maturity_gate_issue_decisions(issue_decisions, :gated),
+          out_of_scope: maturity_gate_issue_decisions(issue_decisions, :out_of_scope),
+          evaluated_at: DateTime.utc_now()
+        }
+    }
+  end
+
+  defp record_maturity_gate_decisions(%State{} = state, _issues, _active_states, _terminal_states), do: state
+
+  defp maturity_gate_issue_decisions(issue_decisions, :gated) do
+    issue_decisions
+    |> Enum.filter(fn
+      %{decision: %MaturityGate{status: :gated}} -> true
+      _entry -> false
+    end)
+    |> Enum.map(&maturity_gate_issue_decision/1)
+  end
+
+  defp maturity_gate_issue_decisions(issue_decisions, :out_of_scope) do
+    issue_decisions
+    |> Enum.filter(fn
+      %{issue: %Issue{blocked_by: blockers}, decision: %MaturityGate{scope: :out_of_scope}} when blockers != [] -> true
+      _entry -> false
+    end)
+    |> Enum.map(&maturity_gate_issue_decision/1)
+  end
+
+  defp maturity_gate_issue_decision(%{issue: %Issue{} = issue, decision: %MaturityGate{} = decision}) do
+    %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      state: issue.state,
+      issue_url: issue.url,
+      status: decision.status,
+      scope: decision.scope,
+      blockers: Enum.map(decision.blocker_decisions, &maturity_gate_blocker_decision/1),
+      warnings: decision.warnings
+    }
+  end
+
+  defp maturity_gate_blocker_decision(%{blocker: blocker, status: status, reasons: reasons}) when is_map(blocker) do
+    %{
+      id: Map.get(blocker, :id),
+      identifier: Map.get(blocker, :identifier),
+      state: Map.get(blocker, :state),
+      labels: Map.get(blocker, :labels, []),
+      status: status,
+      reasons: reasons
     }
   end
 
@@ -1841,6 +1923,7 @@ defmodule SymphonyElixir.Orchestrator do
        blocked: blocked,
        codex_totals: state.codex_totals,
        rate_limits: Map.get(state, :codex_rate_limits),
+       maturity_gate: maturity_gate_snapshot(state, terminal_state_set()),
        polling: %{
          checking?: state.poll_check_in_progress == true,
          next_poll_in_ms: next_poll_in_ms(state.next_poll_due_at_ms, now_ms),
@@ -1869,6 +1952,15 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp blocked_issue_url(%{issue: %Issue{url: url}}), do: url
   defp blocked_issue_url(_metadata), do: nil
+
+  defp maturity_gate_snapshot(%State{} = state, terminal_states) do
+    %{
+      config: maturity_gate_config(terminal_states),
+      evaluated_at: Map.get(state.maturity_gate_decisions, :evaluated_at),
+      gated: Map.get(state.maturity_gate_decisions, :gated, []),
+      out_of_scope: Map.get(state.maturity_gate_decisions, :out_of_scope, [])
+    }
+  end
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = extract_token_delta(running_entry, update)

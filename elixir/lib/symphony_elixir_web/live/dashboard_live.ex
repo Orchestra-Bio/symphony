@@ -126,6 +126,55 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <section class="section-card">
           <div class="section-header">
             <div>
+              <h2 class="section-title">Maturity gate</h2>
+              <p class="section-copy">Dependency-blocked candidate issues from the latest gate evaluation.</p>
+            </div>
+            <span :if={@payload.maturity_gate.evaluated_at} class="muted mono">
+              <%= @payload.maturity_gate.evaluated_at %>
+            </span>
+          </div>
+
+          <div class="config-grid">
+            <div class="config-item">
+              <span class="config-label">maturity_labels</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_labels) %></span>
+            </div>
+            <div class="config-item">
+              <span class="config-label">maturity_gate_state_scope</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_gate_state_scope) %></span>
+            </div>
+            <div class="config-item">
+              <span class="config-label">daemon_states</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.daemon_states) %></span>
+            </div>
+            <div class="config-item">
+              <span class="config-label">terminal_states</span>
+              <span class="config-value"><%= format_list(@payload.maturity_gate.config.terminal_states) %></span>
+            </div>
+          </div>
+
+          <div class="gate-subsection">
+            <h3 class="subsection-title">Gated work</h3>
+            <.maturity_gate_table
+              entries={@payload.maturity_gate.gated}
+              blocker_header="Blockers"
+              empty="No candidate issues are currently held by the maturity gate."
+            />
+          </div>
+
+          <div class="gate-subsection">
+            <h3 class="subsection-title">Out of gate scope</h3>
+            <.maturity_gate_table
+              entries={@payload.maturity_gate.out_of_scope}
+              blocker_header="Visible blockers"
+              empty="No blocked candidate issues are bypassing the gate through state scope."
+            />
+          </div>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
               <h2 class="section-title">Running sessions</h2>
               <p class="section-copy">Active issues, last known agent activity, and token usage.</p>
             </div>
@@ -341,6 +390,60 @@ defmodule SymphonyElixirWeb.DashboardLive do
     Endpoint.config(:snapshot_timeout_ms) || 15_000
   end
 
+  attr(:entries, :list, required: true)
+  attr(:blocker_header, :string, required: true)
+  attr(:empty, :string, required: true)
+
+  defp maturity_gate_table(assigns) do
+    ~H"""
+    <%= if @entries == [] do %>
+      <p class="empty-state"><%= @empty %></p>
+    <% else %>
+      <div class="table-wrap">
+        <table class="data-table gate-table">
+          <thead>
+            <tr>
+              <th>Dependent</th>
+              <th><%= @blocker_header %></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={entry <- @entries}>
+              <td>
+                <div class="issue-stack">
+                  <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                  <span class="gate-issue-title"><%= entry.title || "Untitled" %></span>
+                  <span class={state_badge_class(entry.state)}><%= entry.state %></span>
+                </div>
+              </td>
+              <td>
+                <div class="blocker-list">
+                  <div :for={blocker <- entry.blockers} class="blocker-row">
+                    <div class="blocker-main">
+                      <span class={gate_status_badge_class(blocker.status)}>
+                        <%= format_gate_status(blocker.status) %>
+                      </span>
+                      <span class="issue-id"><%= blocker.identifier || "unknown" %></span>
+                      <span class={state_badge_class(blocker.state || "unknown")}>
+                        <%= blocker.state || "unknown" %>
+                      </span>
+                    </div>
+                    <div class="label-list">
+                      <span :for={label <- blocker.labels} class="label-chip"><%= label %></span>
+                      <span :if={blocker.labels == []} class="muted">no labels</span>
+                    </div>
+                    <div class="gate-reason"><%= blocker.reason || "n/a" %></div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+    """
+  end
+
   attr(:identifier, :string, required: true)
   attr(:url, :string, default: nil)
 
@@ -436,6 +539,29 @@ defmodule SymphonyElixirWeb.DashboardLive do
       true -> base
     end
   end
+
+  defp gate_status_badge_class(status) do
+    base = "gate-status-badge"
+
+    case status do
+      "satisfied" -> "#{base} gate-status-satisfied"
+      "gating" -> "#{base} gate-status-gating"
+      "ignored" -> "#{base} gate-status-ignored"
+      "out_of_scope" -> "#{base} gate-status-out-of-scope"
+      _ -> base
+    end
+  end
+
+  defp format_gate_status("satisfied"), do: "Satisfied"
+  defp format_gate_status("gating"), do: "Gating"
+  defp format_gate_status("ignored"), do: "Ignored"
+  defp format_gate_status("out_of_scope"), do: "Out of scope"
+  defp format_gate_status(status) when is_binary(status), do: status
+  defp format_gate_status(_status), do: "n/a"
+
+  defp format_list([]), do: "none"
+  defp format_list(values) when is_list(values), do: Enum.join(values, ", ")
+  defp format_list(_values), do: "none"
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)

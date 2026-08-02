@@ -5,9 +5,16 @@ defmodule SymphonyElixir.MaturityGate do
 
   alias SymphonyElixir.Linear.Issue
 
-  defstruct status: :eligible, blockers: [], warnings: []
+  defstruct status: :eligible, scope: :in_scope, blockers: [], warnings: [], blocker_decisions: []
 
   @type warning :: {:daemon_blocker_ignored, Issue.blocker_ref()}
+  @type blocker_reason ::
+          :terminal | :maturity_label | :not_terminal | :missing_maturity_label | :daemon_state | :out_of_gate_scope
+  @type blocker_decision :: %{
+          blocker: Issue.blocker_ref(),
+          status: :satisfied | :gating | :ignored | :out_of_scope,
+          reasons: [blocker_reason()]
+        }
   @type config :: %{
           optional(:terminal_states) => [String.t()],
           optional(:daemon_states) => [String.t()],
@@ -16,8 +23,10 @@ defmodule SymphonyElixir.MaturityGate do
         }
   @type t :: %__MODULE__{
           status: :eligible | :gated,
+          scope: :in_scope | :out_of_scope,
           blockers: [Issue.blocker_ref()],
-          warnings: [warning()]
+          warnings: [warning()],
+          blocker_decisions: [blocker_decision()]
         }
   @type result :: :eligible | {:eligible_with_warnings, [warning()]} | {:gated, [Issue.blocker_ref()]}
 
@@ -25,7 +34,7 @@ defmodule SymphonyElixir.MaturityGate do
   def evaluate(%Issue{} = issue, %{} = config) do
     case issue_in_scope?(issue, config) do
       true -> scoped_decision(issue, config)
-      false -> %__MODULE__{}
+      false -> out_of_scope_decision(issue)
     end
   end
 
@@ -45,21 +54,36 @@ defmodule SymphonyElixir.MaturityGate do
   end
 
   defp scoped_decision(%Issue{} = issue, config) do
-    {blockers, warnings} =
-      Enum.reduce(issue.blocked_by, {[], []}, fn blocker, acc ->
-        record_blocker_status(blocker_status(blocker, config), blocker, acc)
-      end)
+    blocker_decisions = Enum.map(issue.blocked_by, &blocker_decision(&1, config))
+    blockers = Enum.flat_map(blocker_decisions, &gating_blocker/1)
+    warnings = Enum.flat_map(blocker_decisions, &blocker_warning/1)
 
     %__MODULE__{
       status: if(blockers == [], do: :eligible, else: :gated),
-      blockers: Enum.reverse(blockers),
-      warnings: Enum.reverse(warnings)
+      blockers: blockers,
+      warnings: warnings,
+      blocker_decisions: blocker_decisions
     }
   end
 
-  defp record_blocker_status(:satisfied, _blocker, acc), do: acc
-  defp record_blocker_status(:gated, blocker, {blockers, warnings}), do: {[blocker | blockers], warnings}
-  defp record_blocker_status({:warning, warning}, _blocker, {blockers, warnings}), do: {blockers, [warning | warnings]}
+  defp out_of_scope_decision(%Issue{} = issue) do
+    %__MODULE__{
+      scope: :out_of_scope,
+      blocker_decisions:
+        Enum.map(issue.blocked_by, fn blocker ->
+          %{blocker: blocker, status: :out_of_scope, reasons: [:out_of_gate_scope]}
+        end)
+    }
+  end
+
+  defp gating_blocker(%{status: :gating, blocker: blocker}), do: [blocker]
+  defp gating_blocker(_decision), do: []
+
+  defp blocker_warning(%{status: :ignored, blocker: blocker, reasons: reasons}) do
+    if :daemon_state in reasons, do: [{:daemon_blocker_ignored, blocker}], else: []
+  end
+
+  defp blocker_warning(_decision), do: []
 
   defp regression_candidates(previous_issue, refreshed_issue, config, maturity_labels) do
     previous_blockers = previous_blocker_index(previous_issue.blocked_by)
@@ -83,7 +107,7 @@ defmodule SymphonyElixir.MaturityGate do
     normalize_string(state) in scope
   end
 
-  defp blocker_status(blocker, config) when is_map(blocker) do
+  defp blocker_decision(blocker, config) when is_map(blocker) do
     terminal_states = normalized_values(Map.get(config, :terminal_states, []))
     daemon_states = normalized_values(Map.get(config, :daemon_states, []))
     maturity_labels = normalized_values(Map.get(config, :maturity_labels, []))
@@ -91,18 +115,21 @@ defmodule SymphonyElixir.MaturityGate do
 
     cond do
       blocker_state in terminal_states ->
-        :satisfied
+        %{blocker: blocker, status: :satisfied, reasons: [:terminal]}
 
       blocker_state in daemon_states ->
-        {:warning, {:daemon_blocker_ignored, blocker}}
+        %{blocker: blocker, status: :ignored, reasons: [:daemon_state]}
 
       maturity_labels != [] and has_maturity_label?(blocker, maturity_labels) ->
-        :satisfied
+        %{blocker: blocker, status: :satisfied, reasons: [:maturity_label]}
 
       true ->
-        :gated
+        %{blocker: blocker, status: :gating, reasons: gating_reasons(maturity_labels)}
     end
   end
+
+  defp gating_reasons([]), do: [:not_terminal]
+  defp gating_reasons(_maturity_labels), do: [:not_terminal, :missing_maturity_label]
 
   defp maturity_regressed?(previous_blocker, refreshed_blocker, config, maturity_labels) do
     terminal_states = normalized_values(Map.get(config, :terminal_states, []))
