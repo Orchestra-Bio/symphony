@@ -48,6 +48,8 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       blocked: %{},
       retry_attempts: %{},
+      dispatch_rejections: %{},
+      maturity_gate_decisions: %{},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -78,6 +80,7 @@ defmodule SymphonyElixir.Orchestrator do
           codex_rate_limits: nil
         }
 
+        log_effective_tracker_config(config)
         run_terminal_workspace_cleanup()
         state = schedule_tick(state, 0)
 
@@ -279,8 +282,7 @@ defmodule SymphonyElixir.Orchestrator do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          issues <- ensure_candidate_workpads(issues),
-         {:ok, issues, state} <- append_due_daemon_candidates(issues, state),
-         true <- available_slots(state) > 0 do
+         {:ok, issues, state} <- append_due_daemon_candidates(issues, state) do
       choose_issues(issues, state)
     else
       {:error, :missing_linear_api_token} ->
@@ -319,9 +321,6 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:error, reason} ->
         Logger.error("Failed to fetch from Linear: #{inspect(reason)}")
-        state
-
-      false ->
         state
     end
   end
@@ -404,6 +403,12 @@ defmodule SymphonyElixir.Orchestrator do
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
     should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set())
+  end
+
+  @doc false
+  @spec evaluate_dispatch_issue_for_test(Issue.t(), term()) :: {boolean(), term()}
+  def evaluate_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
+    evaluate_dispatch_issue(issue, state, active_state_set(), terminal_state_set())
   end
 
   @doc false
@@ -833,15 +838,35 @@ defmodule SymphonyElixir.Orchestrator do
     active_states = active_state_set()
     terminal_states = terminal_state_set()
 
-    issues
-    |> sort_issues_for_dispatch()
-    |> Enum.reduce(state, fn issue, state_acc ->
-      if should_dispatch_issue?(issue, state_acc, active_states, terminal_states) do
-        dispatch_issue(state_acc, issue)
-      else
-        state_acc
-      end
-    end)
+    {state, visible_issue_ids} =
+      issues
+      |> sort_issues_for_dispatch()
+      |> Enum.reduce({state, MapSet.new()}, fn
+        %Issue{} = issue, {state_acc, visible_acc} ->
+          {dispatch?, state_acc} = evaluate_dispatch_issue(issue, state_acc, active_states, terminal_states)
+          visible_acc = maybe_put_issue_log_key(visible_acc, issue)
+
+          state_acc =
+            if dispatch? do
+              dispatch_issue(state_acc, issue)
+            else
+              state_acc
+            end
+
+          {state_acc, visible_acc}
+
+        _issue, acc ->
+          acc
+      end)
+
+    prune_dispatch_observability(state, visible_issue_ids)
+  end
+
+  defp maybe_put_issue_log_key(visible_issue_ids, %Issue{} = issue) do
+    case issue_log_key(issue) do
+      nil -> visible_issue_ids
+      issue_id -> MapSet.put(visible_issue_ids, issue_id)
+    end
   end
 
   defp sort_issues_for_dispatch(issues) when is_list(issues) do
@@ -866,21 +891,271 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp should_dispatch_issue?(
          %Issue{} = issue,
-         %State{running: running, claimed: claimed, blocked: blocked} = state,
+         %State{} = state,
          active_states,
          terminal_states
        ) do
-    candidate_issue?(issue, active_states, terminal_states) and
-      maturity_gate_allows?(issue, terminal_states) and
-      !MapSet.member?(claimed, issue.id) and
-      !Map.has_key?(running, issue.id) and
-      !Map.has_key?(blocked, issue.id) and
-      available_slots(state) > 0 and
-      state_slots_available?(issue, running) and
-      worker_slots_available?(state)
+    {dispatch?, _state} = evaluate_dispatch_issue(issue, state, active_states, terminal_states)
+    dispatch?
   end
 
-  defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
+  defp evaluate_dispatch_issue(%Issue{} = issue, %State{} = state, active_states, terminal_states) do
+    decision = dispatch_decision(issue, state, active_states, terminal_states)
+    state = log_dispatch_decision(issue, state, decision)
+    {decision.dispatch, state}
+  end
+
+  defp dispatch_decision(%Issue{} = issue, %State{} = state, active_states, terminal_states) do
+    case candidate_rejection(issue, active_states, terminal_states) do
+      nil ->
+        maturity_gate_dispatch_decision(issue, state, terminal_states)
+
+      {reason, details} ->
+        %{
+          dispatch: false,
+          rejection_log: dispatch_rejection_log(issue, reason, details),
+          maturity_gate_logs: []
+        }
+    end
+  end
+
+  defp maturity_gate_dispatch_decision(%Issue{} = issue, %State{} = state, terminal_states) do
+    {gate_decision, gate_config} = maturity_gate_decision(issue, terminal_states)
+    maturity_gate_logs = maturity_gate_logs(issue, gate_decision, gate_config)
+
+    case MaturityGate.result(gate_decision) do
+      {:gated, _blockers} ->
+        %{
+          dispatch: false,
+          rejection_log: nil,
+          maturity_gate_logs: maturity_gate_logs
+        }
+
+      _result ->
+        case dispatch_rejection(issue, state) do
+          nil ->
+            %{dispatch: true, rejection_log: nil, maturity_gate_logs: maturity_gate_logs}
+
+          {reason, details} ->
+            %{
+              dispatch: false,
+              rejection_log: dispatch_rejection_log(issue, reason, details),
+              maturity_gate_logs: maturity_gate_logs
+            }
+        end
+    end
+  end
+
+  defp candidate_rejection(
+         %Issue{id: id, identifier: identifier, title: title, state: state_name} = issue,
+         active_states,
+         terminal_states
+       ) do
+    cond do
+      not present_string?(id) ->
+        {:invalid_candidate, %{missing: :id}}
+
+      not present_string?(identifier) ->
+        {:invalid_candidate, %{missing: :identifier}}
+
+      not present_string?(title) ->
+        {:invalid_candidate, %{missing: :title}}
+
+      not present_string?(state_name) ->
+        {:invalid_candidate, %{missing: :state}}
+
+      not issue_routable?(issue) ->
+        {:not_routable,
+         %{
+           assigned_to_worker: issue.assigned_to_worker,
+           labels: issue.labels,
+           required_labels: Config.settings!().tracker.required_labels
+         }}
+
+      terminal_issue_state?(state_name, terminal_states) ->
+        {:terminal_state, %{state: state_name, terminal_states: Enum.sort(MapSet.to_list(terminal_states))}}
+
+      not active_issue_state?(state_name, active_states) ->
+        {:non_active_state, %{state: state_name, active_states: Enum.sort(MapSet.to_list(active_states))}}
+
+      true ->
+        nil
+    end
+  end
+
+  defp candidate_rejection(_issue, _active_states, _terminal_states),
+    do: {:invalid_candidate, %{missing: :issue}}
+
+  defp dispatch_rejection(
+         %Issue{} = issue,
+         %State{running: running, claimed: claimed, blocked: blocked} = state
+       ) do
+    cond do
+      Map.has_key?(running, issue.id) ->
+        {:already_running, %{}}
+
+      Map.has_key?(blocked, issue.id) ->
+        {:already_blocked, %{error: blocked_issue_error(blocked, issue.id)}}
+
+      MapSet.member?(claimed, issue.id) ->
+        {:already_claimed, %{}}
+
+      available_slots(state) <= 0 ->
+        {:slot_exhausted,
+         %{
+           scope: :global,
+           available_slots: available_slots(state),
+           running_count: map_size(running),
+           max_concurrent_agents: state.max_concurrent_agents || Config.settings!().agent.max_concurrent_agents
+         }}
+
+      not state_slots_available?(issue, running) ->
+        {:slot_exhausted,
+         %{
+           scope: :state,
+           state: issue.state,
+           running_count: running_issue_count_for_state(running, issue.state),
+           max_concurrent_agents: Config.max_concurrent_agents_for_state(issue.state)
+         }}
+
+      not worker_slots_available?(state) ->
+        {:slot_exhausted,
+         %{
+           scope: :worker,
+           ssh_hosts: Config.settings!().worker.ssh_hosts,
+           max_concurrent_agents_per_host: Config.settings!().worker.max_concurrent_agents_per_host
+         }}
+
+      true ->
+        nil
+    end
+  end
+
+  defp blocked_issue_error(blocked, issue_id) when is_map(blocked) and is_binary(issue_id) do
+    blocked
+    |> Map.get(issue_id, %{})
+    |> Map.get(:error)
+  end
+
+  defp blocked_issue_error(_blocked, _issue_id), do: nil
+
+  defp log_dispatch_decision(%Issue{} = issue, %State{} = state, decision) when is_map(decision) do
+    state
+    |> maybe_log_cached(:maturity_gate_decisions, issue, Map.get(decision, :maturity_gate_logs, []))
+    |> maybe_log_cached(:dispatch_rejections, issue, Map.get(decision, :rejection_log))
+  end
+
+  defp maybe_log_cached(%State{} = state, field, %Issue{} = issue, nil)
+       when field in [:maturity_gate_decisions, :dispatch_rejections] do
+    case issue_log_key(issue) do
+      nil ->
+        state
+
+      issue_id ->
+        update_in(state, [Access.key(field)], &Map.delete(&1, issue_id))
+    end
+  end
+
+  defp maybe_log_cached(%State{} = state, field, %Issue{} = issue, [])
+       when field in [:maturity_gate_decisions, :dispatch_rejections] do
+    maybe_log_cached(state, field, issue, nil)
+  end
+
+  defp maybe_log_cached(%State{} = state, field, %Issue{} = issue, logs)
+       when field in [:maturity_gate_decisions, :dispatch_rejections] do
+    case issue_log_key(issue) do
+      nil -> state
+      issue_id -> maybe_log_cached_for_issue(state, field, issue_id, logs)
+    end
+  end
+
+  defp maybe_log_cached_for_issue(%State{} = state, field, issue_id, logs)
+       when field in [:maturity_gate_decisions, :dispatch_rejections] and is_binary(issue_id) do
+    if Map.get(Map.fetch!(state, field), issue_id) == logs do
+      state
+    else
+      Enum.each(List.wrap(logs), fn {level, message} -> Logger.log(level, message) end)
+      update_in(state, [Access.key(field)], &Map.put(&1, issue_id, logs))
+    end
+  end
+
+  defp dispatch_rejection_log(%Issue{} = issue, reason, details) do
+    {:info,
+     "Dispatch candidate rejected: #{issue_context(issue)} state=#{inspect(issue.state)} " <>
+       "reason=#{reason} details=#{inspect(details)}"}
+  end
+
+  defp maturity_gate_config_context(config) when is_map(config) do
+    [
+      "maturity_labels=#{inspect(Map.get(config, :maturity_labels, []))}",
+      "maturity_gate_state_scope=#{inspect(Map.get(config, :maturity_gate_state_scope, []))}",
+      "daemon_states=#{inspect(Map.get(config, :daemon_states, []))}",
+      "terminal_states=#{inspect(Map.get(config, :terminal_states, []))}"
+    ]
+    |> Enum.join(" ")
+  end
+
+  defp blockers_context(blockers) when is_list(blockers) do
+    "[" <> Enum.map_join(blockers, ", ", fn blocker -> "{#{blocker_context(blocker)}}" end) <> "]"
+  end
+
+  defp maturity_gate_logs(%Issue{} = issue, %MaturityGate{status: :gated} = decision, config) do
+    [
+      {:info,
+       "Maturity gate rejected dispatch: #{issue_context(issue)} dependent_state=#{inspect(issue.state)} " <>
+         "blockers=#{blockers_context(decision.blockers)} #{maturity_gate_config_context(config)}"}
+      | maturity_gate_warning_logs(issue, decision.warnings)
+    ]
+  end
+
+  defp maturity_gate_logs(%Issue{} = issue, %MaturityGate{scope: :out_of_scope} = decision, config) do
+    [
+      {:info,
+       "Maturity gate skipped; issue out of gate scope: #{issue_context(issue)} " <>
+         "dependent_state=#{inspect(issue.state)} blocked_by=#{length(issue.blocked_by)} " <>
+         "#{maturity_gate_config_context(config)}"}
+      | maturity_gate_warning_logs(issue, decision.warnings)
+    ]
+  end
+
+  defp maturity_gate_logs(%Issue{} = issue, %MaturityGate{warnings: warnings}, _config) when warnings != [] do
+    maturity_gate_warning_logs(issue, warnings)
+  end
+
+  defp maturity_gate_logs(%Issue{}, %MaturityGate{}, _config), do: []
+
+  defp maturity_gate_warning_logs(%Issue{} = issue, warnings) when is_list(warnings) do
+    Enum.map(warnings, fn {:daemon_blocker_ignored, blocker} ->
+      {:warning,
+       "Ignoring daemon-state blocker in maturity gate: #{issue_context(issue)} " <>
+         "blocker=#{blocker_context(blocker)}"}
+    end)
+  end
+
+  defp blocker_labels(blocker) when is_map(blocker) do
+    blocker
+    |> Map.get(:labels, [])
+    |> case do
+      labels when is_list(labels) -> labels
+      _ -> []
+    end
+  end
+
+  defp prune_dispatch_observability(%State{} = state, visible_issue_ids) do
+    visible_issue_ids = MapSet.to_list(visible_issue_ids)
+
+    %{
+      state
+      | dispatch_rejections: Map.take(state.dispatch_rejections, visible_issue_ids),
+        maturity_gate_decisions: Map.take(state.maturity_gate_decisions, visible_issue_ids)
+    }
+  end
+
+  defp issue_log_key(%Issue{id: id}) when is_binary(id), do: id
+  defp issue_log_key(_issue), do: nil
+
+  defp present_string?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_string?(_value), do: false
 
   defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
     limit = Config.max_concurrent_agents_for_state(issue_state)
@@ -925,7 +1200,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp maturity_gate_allows?(%Issue{} = issue, terminal_states) do
-    decision = MaturityGate.evaluate(issue, maturity_gate_config(terminal_states))
+    {decision, _config} = maturity_gate_decision(issue, terminal_states)
 
     log_maturity_gate_warnings(issue, decision.warnings)
 
@@ -935,11 +1210,16 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  defp maturity_gate_decision(%Issue{} = issue, terminal_states) do
+    config = maturity_gate_config(terminal_states)
+    {MaturityGate.evaluate(issue, config), config}
+  end
+
   defp maturity_gate_config(terminal_states) do
     tracker = Config.settings!().tracker
 
     %{
-      terminal_states: MapSet.to_list(terminal_states),
+      terminal_states: terminal_states |> MapSet.to_list() |> Enum.sort(),
       daemon_states: tracker.daemon_states,
       maturity_labels: tracker.maturity_labels,
       maturity_gate_state_scope: tracker.maturity_gate_state_scope
@@ -998,7 +1278,8 @@ defmodule SymphonyElixir.Orchestrator do
     [
       "id=#{Map.get(blocker, :id) || "n/a"}",
       "identifier=#{Map.get(blocker, :identifier) || "n/a"}",
-      "state=#{Map.get(blocker, :state) || "n/a"}"
+      "state=#{Map.get(blocker, :state) || "n/a"}",
+      "labels=#{inspect(blocker_labels(blocker))}"
     ]
     |> Enum.join(" ")
   end
@@ -1993,6 +2274,27 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp record_session_completion_totals(state, _running_entry), do: state
+
+  defp log_effective_tracker_config(config) do
+    tracker = config.tracker
+
+    Logger.info(
+      "Effective tracker config loaded: " <>
+        "kind=#{inspect(tracker.kind)} " <>
+        "endpoint=#{inspect(tracker.endpoint)} " <>
+        "project_slug=#{inspect(tracker.project_slug)} " <>
+        "team_key=#{inspect(tracker.team_key)} " <>
+        "assignee=#{inspect(tracker.assignee)} " <>
+        "required_labels=#{inspect(tracker.required_labels)} " <>
+        "active_states=#{inspect(tracker.active_states)} " <>
+        "terminal_states=#{inspect(tracker.terminal_states)} " <>
+        "daemon_states=#{inspect(tracker.daemon_states)} " <>
+        "daemon_dispatch_states=#{inspect(tracker.daemon_dispatch_states)} " <>
+        "daemon_default_wake=#{inspect(tracker.daemon_default_wake)} " <>
+        "maturity_labels=#{inspect(tracker.maturity_labels)} " <>
+        "maturity_gate_state_scope=#{inspect(tracker.maturity_gate_state_scope)}"
+    )
+  end
 
   defp refresh_runtime_config(%State{} = state) do
     config = Config.settings!()
