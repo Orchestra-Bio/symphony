@@ -1420,8 +1420,6 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp cleanup_pre_session_retry_workspace(_issue, _metadata), do: :ok
-
   defp retry_workspace_started?(%{workspace_path: workspace_path}) when is_binary(workspace_path) do
     String.trim(workspace_path) != ""
   end
