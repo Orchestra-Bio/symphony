@@ -97,7 +97,7 @@ defmodule SymphonyElixir.Config.Schema do
         |> Enum.map(&(String.trim(&1) |> String.downcase()))
         |> Enum.uniq()
       end)
-      |> update_change(:daemon_states, &Schema.normalize_string_set/1)
+      |> update_change(:daemon_states, &Schema.normalize_state_filter_set/1)
       |> update_change(:daemon_dispatch_states, &Schema.normalize_string_set/1)
       |> update_change(:daemon_default_wake, &Schema.normalize_issue_state/1)
       |> update_change(:maturity_labels, &Schema.normalize_string_set/1)
@@ -189,6 +189,19 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   def normalize_string_set(_values), do: []
+
+  @doc false
+  @spec normalize_state_filter_set(term()) :: [String.t()]
+  def normalize_state_filter_set(values) when is_list(values) do
+    values
+    |> Enum.map(&normalize_state_filter_name/1)
+    |> Enum.uniq()
+  end
+
+  def normalize_state_filter_set(_values), do: []
+
+  defp normalize_state_filter_name(value) when is_binary(value), do: String.trim(value)
+  defp normalize_state_filter_name(value), do: value |> to_string() |> normalize_state_filter_name()
 
   @doc false
   @spec validate_string_set(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()

@@ -55,12 +55,6 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
-  @spec daemon_state_set() :: MapSet.t()
-  def daemon_state_set do
-    settings!().tracker.daemon_states
-    |> MapSet.new()
-  end
-
   @spec daemon_dispatch_state_set() :: MapSet.t()
   def daemon_dispatch_state_set do
     settings!().tracker.daemon_dispatch_states

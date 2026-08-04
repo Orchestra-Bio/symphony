@@ -162,7 +162,7 @@ defmodule SymphonyElixir.MaturityGateTest do
   defp config(overrides \\ []) do
     defaults = %{
       terminal_states: ["done", "canceled"],
-      daemon_states: ["happy", "unhappy"],
+      daemon_states: ["Happy", "Unhappy"],
       maturity_labels: ["mature"],
       maturity_gate_state_scope: ["todo"]
     }

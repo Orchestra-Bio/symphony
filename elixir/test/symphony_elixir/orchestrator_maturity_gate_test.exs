@@ -104,7 +104,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
 
     assert snapshot.config == %{
              terminal_states: ["canceled", "done"],
-             daemon_states: ["happy", "unhappy"],
+             daemon_states: ["Happy", "Unhappy"],
              maturity_labels: ["mature"],
              maturity_gate_state_scope: ["todo"]
            }
@@ -213,7 +213,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert log =~ "labels=[\"needs-review\"]"
     assert log =~ "maturity_labels=[\"mature\"]"
     assert log =~ "maturity_gate_state_scope=[\"todo\"]"
-    assert log =~ "daemon_states=[\"happy\", \"unhappy\"]"
+    assert log =~ "daemon_states=[\"Happy\", \"Unhappy\"]"
     assert log =~ "terminal_states="
     assert length(String.split(log, "Maturity gate rejected dispatch")) == 2
   end
