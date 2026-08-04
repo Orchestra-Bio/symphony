@@ -39,8 +39,15 @@ the anchor is first created, and `Last run <ISO 8601>` after every agent run,
 including failures. Daemon wake timing uses that comment's server-written
 `updatedAt`.
 
-The Linear poll selects that comment server-side with a
-`startsWithIgnoreCase` body filter and reads only `id` and `updatedAt`.
+The Linear poll matches that title server-side with a `startsWithIgnoreCase`
+body filter and never parses comment bodies client-side, because polled
+comments carry metadata only. It reads only `id` and `updatedAt`.
+
+Symphony uses this anchor instead of `## Codex Workpad` because the Codex
+workpad is an agent-internal artifact that Symphony cannot create or guarantee
+will advance. The anchor is not keyed on author; Symphony agents share one
+Linear account, so an author filter would let another ticket's agent advance
+this ticket's clock and make it oversleep silently.
 
 ## Daemon Lease And Retry Exhaustion
 
