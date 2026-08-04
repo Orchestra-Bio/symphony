@@ -735,6 +735,20 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "rendered"
     assert html =~ "turn blocked: waiting for user input"
     assert html =~ "Maturity gate"
+
+    section_titles =
+      ~r/<h2 class="section-title">([^<]+)<\/h2>/
+      |> Regex.scan(html, capture: :all_but_first)
+      |> List.flatten()
+
+    assert section_titles == [
+             "Running sessions",
+             "Rate limits",
+             "Maturity gate",
+             "Blocked sessions",
+             "Retry queue"
+           ]
+
     assert html =~ "maturity_labels"
     assert html =~ "MT-GATED"
     assert html =~ "Gated dependent"
