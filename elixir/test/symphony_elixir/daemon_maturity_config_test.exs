@@ -142,6 +142,7 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert Schema.reject_config_fields(changeset, nil, ["daemon_label"]) == changeset
     assert Schema.normalize_string_set(nil) == []
     assert Schema.normalize_string_set([:Todo, " In Progress ", :Todo]) == ["todo", "in progress"]
+    assert Schema.normalize_state_filter_set(nil) == []
     assert Schema.normalize_state_filter_set([:Todo, " In Progress ", :Todo]) == ["Todo", "In Progress"]
 
     tracker =
