@@ -4,6 +4,9 @@ This file records implemented behavior in the Orchestra fork of Symphony.
 `SPEC.md` stays upstream-owned and is intentionally not edited for these
 fork-only dispatch rules.
 
+Behavior claims in this version were verified against
+`f948c8dc389bd3bd48803ad0121843644511b57b`.
+
 ## Team-Scoped Linear Dispatch
 
 `tracker.team_key` may select Linear issues by team instead of
@@ -66,6 +69,13 @@ blocker gate; its default is `["todo"]`. Out-of-scope means ungated, so removing
 `todo` also removes upstream's `Todo` blocker gate; use `maturity_labels: []` to
 disable maturity gating while preserving terminal-only blockers.
 
+## Maturity-Gated Retry Claims
+
+A retry candidate that is still maturity-gated releases its in-memory claim for
+the normal poll path instead of waiting for a terminal state. If the failed
+attempt never started a session workspace, Symphony removes the pre-session
+workspace residue before releasing the claim.
+
 ## Maturity Regression Advisory
 
 If a running dependent's blocker loses maturity, Symphony writes one advisory
@@ -77,10 +87,21 @@ dependent has not dispatched yet, it simply becomes ineligible again.
 Daemon dispatch occupancy uses existing
 `agent.max_concurrent_agents_by_state` limits on daemon dispatch states. Those
 limits are ceilings; normal implementation work can still use other available
-dispatch capacity.
+dispatch capacity, and there is no separate daemon capacity setting.
+
+Candidate polling is not skipped just because global capacity is exhausted, so
+slot exhaustion can be logged per candidate. Daemon leasing and dispatch still
+require available global, state, and worker capacity.
+
+## Dispatch And Gate Observability
+
+The fork logs effective tracker config at startup and deduplicates repeated gate
+and dispatch decision logs in memory. The orchestrator snapshot and Phoenix
+dashboard expose maturity-gated and out-of-scope candidates with blocker state,
+labels, and gate reasons.
 
 ## Plan-Side Stack Controls
 
-Stack depth limits and branch-base or join-branch behavior are planning and
-workflow constraints. The Elixir engine enforces only the direct Linear blocker
-gate described above.
+Stack depth limits and branch-base or join-branch behavior live in project
+planning and workflow handoffs, not in runtime config. The Elixir engine
+enforces only the direct Linear blocker gate described above.

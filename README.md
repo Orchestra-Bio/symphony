@@ -10,6 +10,11 @@ _In this [demo video](https://player.vimeo.com/video/1186371009?h=5626e4b899), S
 > [!WARNING]
 > Symphony is a low-key engineering preview for testing in trusted environments.
 
+> [!NOTE]
+> This repository is Orchestra Bio's fork of Symphony. `SPEC.md` remains
+> upstream-owned; fork-specific behavior is tracked in
+> [DIVERGENCES.md](DIVERGENCES.md).
+
 ## Running Symphony
 
 ### Requirements

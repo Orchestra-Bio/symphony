@@ -4,7 +4,7 @@
 project_code: daemon-maturity
 ticket: ABC-291
 base_branch: main
-source_ref: 4f141507d8eb76e7cc4765293f31488fdf8aefc6
+source_ref: f948c8dc389bd3bd48803ad0121843644511b57b
 ```
 
 ## Purpose
@@ -15,41 +15,41 @@ operator guidance; the root `DIVERGENCES.md` is the current behavior guide.
 
 ## Sources Read
 
-- Linear issue `ABC-291`, including Jeremy Carroll's two 2026-07-27 direction
-  comments that require a short `DIVERGENCES.md`, source behavior from code, and
-  retry-exhaustion text reflecting DMAT-020.
-- Project metadata for `daemon-maturity`: project code `daemon-maturity`,
-  color `pink`, base branch `main`, no integration branch, and human lead Jeremy
-  Carroll.
-- Google handoff sources, fetched through the required Symphony reader helper:
-  Daemon Tickets v2
-  `b52f85b72709075449c44db207e96a0e758c27fd4be6a8c5bdfced9cd4040d2f`,
-  Maturity-Gated Dependencies v2
-  `7a4d9bcdf19e4fbb452db3b8a228aef1464eba61c8f84326f7c1aa510385ea45`,
-  and Minimal Ticket State Model v7
-  `ae2a97e943f43a7ece9e050da81a9a2e7ff70dc50384997fbda7afb71a2fe91e`.
+- Linear issue `ABC-291` and project metadata for scope, project code
+  `daemon-maturity`, color `pink`, base branch `main`, no integration branch,
+  and human lead Jeremy Carroll.
+- Internal Google handoff sources were fetched through the required Symphony
+  reader helper. Public readers should use the archived requirements and design
+  documents below as the dereferenceable record of those inputs.
 - Local planning sources:
-  `docs/symphony-plans/daemon-maturity-requirements.md`,
-  `docs/symphony-plans/daemon-maturity-design.md`, and
-  `docs/symphony-plans/fan-out-plan-ABC-227-daemon-maturity.md`.
+  `docs/archive/daemon-maturity/daemon-maturity-requirements.md`,
+  `docs/archive/daemon-maturity/daemon-maturity-design.md`, and
+  `docs/archive/daemon-maturity/fan-out-plan-ABC-227-daemon-maturity.md`.
 - Verification and setup sources:
-  `docs/symphony-plans/daemon-maturity-daemon-linear-verification.md`,
-  `docs/symphony-plans/daemon-maturity-upstream-spec-verification.md`,
-  `docs/symphony-plans/daemon-maturity-linear-mechanics-verification.md`, and
-  `docs/symphony-plans/daemon-maturity-team-configuration.md`.
+  `docs/archive/daemon-maturity/daemon-maturity-daemon-linear-verification.md`,
+  `docs/archive/daemon-maturity/daemon-maturity-upstream-spec-verification.md`,
+  `docs/archive/daemon-maturity/daemon-maturity-linear-mechanics-verification.md`,
+  and `docs/archive/daemon-maturity/daemon-maturity-team-configuration.md`.
 - GitHub PR evidence: PR #1, #2, and #3 decision/review comments; PR #7 body
   and review for `tracker.team_key`; PR #12 and #13 second review comments for
   the Symphony workpad anchor; PR #14 for DMAT-016; PR #17 for daemon lifecycle;
-  PR #18 for maturity gating; PR #20 for history-based retry-exhaustion restore.
+  PR #18 for maturity gating; PR #20 for history-based retry-exhaustion restore;
+  PR #22 for maturity-gated retry-claim release; PR #23 for dispatch decision
+  logging and slot-exhaustion visibility; and PR #24 for maturity-gate dashboard
+  visibility.
 - PR #19 / ABC-290 status: open at source-read time. It writes three archive
   files directly to `docs/archive/daemon-maturity/` when it lands and records
   real-use verification as blocked on operator switchover to fork `main`.
-- Current implementation code at `4f141507d8eb76e7cc4765293f31488fdf8aefc6`,
-  especially `elixir/lib/symphony_elixir/config.ex`,
+- Original implementation source read at
+  `4f141507d8eb76e7cc4765293f31488fdf8aefc6`, especially
+  `elixir/lib/symphony_elixir/config.ex`,
   `config/schema.ex`, `linear/client.ex`, `linear/issue.ex`,
   `linear/adapter.ex`, `tracker.ex`, `tracker/memory.ex`,
   `daemon_wake.ex`, `maturity_gate.ex`, `symphony_workpad.ex`, and
   `orchestrator.ex`.
+- Rework implementation code at `f948c8dc389bd3bd48803ad0121843644511b57b`,
+  especially `orchestrator.ex`, `maturity_gate.ex`, `presenter.ex`, and
+  `dashboard_live.ex`.
 
 Unavailable sources: none.
 
@@ -89,13 +89,22 @@ Unavailable sources: none.
   restores the newest transition's `fromState` when that transition entered a
   configured daemon dispatch state. It leaves the ticket in the dispatch state
   for operator recovery when history is missing or unreadable.
+- `Orchestrator.maybe_dispatch/1` fetches visible candidates before dispatch
+  capacity checks, records maturity-gate snapshot data from that poll, and logs
+  repeated gate or dispatch rejection decisions through an in-memory de-dup
+  cache.
 - `MaturityGate.evaluate/2` is pure and direct-edge. It treats terminal
   blockers and configured maturity labels as satisfied, ignores daemon-state
   blockers with warnings, and returns `{:gated, blockers}` for unsatisfied
   blockers.
 - `Orchestrator` uses the maturity gate in candidate selection, retry lookup,
-  and dispatch-time revalidation, and emits one advisory comment per observed
-  maturity regression without killing the running worker.
+  and dispatch-time revalidation. A retry lookup that is still maturity-gated
+  releases the issue claim for a later poll and removes pre-session workspace
+  residue when no session workspace had started.
+- `Orchestrator` emits one advisory comment per observed maturity regression
+  without killing the running worker.
+- The dashboard API and Phoenix dashboard expose maturity-gated and out-of-scope
+  candidate snapshots with blocker state, labels, and gate reasons.
 
 ## Archive Decision
 
