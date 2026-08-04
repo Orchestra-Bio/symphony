@@ -92,6 +92,23 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
     refute_receive {:unexpected_lease, _, _}, 50
   end
 
+  test "daemon poll passes configured state filters without lowercasing" do
+    write_daemon_workflow!(daemon_states: [" Happy ", "UNHAPPY", "happy"])
+
+    assert {:ok, []} =
+             Orchestrator.append_due_daemon_candidates_for_test(
+               [],
+               state(),
+               ~U[2026-07-26 10:00:00Z],
+               fetch_issues_by_states: fn states ->
+                 send(self(), {:daemon_state_filter, states})
+                 {:ok, []}
+               end
+             )
+
+    assert_receive {:daemon_state_filter, ["Happy", "UNHAPPY", "happy"]}
+  end
+
   test "daemon in any configured dispatch state is dispatchable for crash recovery" do
     recovery_issue =
       issue(%{
@@ -182,6 +199,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
 
   defp write_daemon_workflow!(opts \\ []) do
     max_concurrent_agents_by_state = Keyword.get(opts, :max_concurrent_agents_by_state, %{})
+    daemon_states = Keyword.get(opts, :daemon_states, ["Happy", "Unhappy"])
 
     workflow = """
     ---
@@ -189,7 +207,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
       kind: memory
       active_states: ["Todo", "Evaluating", "Legacy Evaluating"]
       terminal_states: ["Done", "Canceled"]
-      daemon_states: ["Happy", "Unhappy"]
+      daemon_states: #{inspect(daemon_states)}
       daemon_dispatch_states: ["Evaluating", "Legacy Evaluating"]
       daemon_default_wake: "1h"
     agent:

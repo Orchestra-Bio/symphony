@@ -19,7 +19,6 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert config.tracker.maturity_labels == []
     assert config.tracker.maturity_gate_state_scope == ["todo"]
 
-    assert Config.daemon_state_set() == MapSet.new()
     assert Config.daemon_dispatch_state_set() == MapSet.new()
     assert Config.daemon_dispatch_target_state() == nil
     assert Config.daemon_default_wake() == "1h"
@@ -32,7 +31,7 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     write_daemon_workflow!(%{
       "active_states" => ["Todo", "Evaluating", "Review"],
       "terminal_states" => ["Done", "Canceled"],
-      "daemon_states" => [" Happy ", "Unhappy"],
+      "daemon_states" => [" Happy ", "UNHAPPY", "happy"],
       "daemon_dispatch_states" => [" Evaluating "],
       "daemon_default_wake" => " 4H ",
       "maturity_labels" => [" Mature ", "READY", "mature"],
@@ -43,12 +42,11 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
 
     assert config.tracker.active_states == ["Todo", "Evaluating", "Review"]
     assert config.tracker.terminal_states == ["Done", "Canceled"]
-    assert config.tracker.daemon_states == ["Happy", "Unhappy"]
+    assert config.tracker.daemon_states == ["Happy", "UNHAPPY", "happy"]
     assert config.tracker.daemon_dispatch_states == ["evaluating"]
     assert config.tracker.daemon_default_wake == "4h"
     assert config.tracker.maturity_labels == ["mature", "ready"]
     assert config.tracker.maturity_gate_state_scope == ["todo", "review"]
-    assert Config.daemon_state_set() == MapSet.new(["Happy", "Unhappy"])
     assert Config.daemon_dispatch_target_state() == "evaluating"
   end
 
