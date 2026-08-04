@@ -1,6 +1,8 @@
 defmodule SymphonyElixir.OrchestratorMaturityGateTest do
   use SymphonyElixir.TestSupport
 
+  @stale_cache_age_ms 5 * 60 * 60 * 1_000
+
   defmodule FailingLinearClient do
     def fetch_candidate_issues, do: {:error, :rate_limited}
     def fetch_issues_by_states(_states), do: {:ok, []}
@@ -216,6 +218,61 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert length(String.split(log, "Maturity gate rejected dispatch")) == 2
   end
 
+  test "re-logs unchanged gated maturity decisions after the cache ttl per issue" do
+    issue_a =
+      issue(
+        id: "gated-dependent-a",
+        identifier: "ABC-GATED-A",
+        blocked_by: [blocker(id: "immature-blocker-a", identifier: "ABC-BLOCKER-A", state: "In Review")]
+      )
+
+    issue_b =
+      issue(
+        id: "gated-dependent-b",
+        identifier: "ABC-GATED-B",
+        blocked_by: [blocker(id: "immature-blocker-b", identifier: "ABC-BLOCKER-B", state: "In Review")]
+      )
+
+    log =
+      capture_log(fn ->
+        {false, state_a} = Orchestrator.evaluate_dispatch_issue_for_test(issue_a, state())
+        {false, state_b} = Orchestrator.evaluate_dispatch_issue_for_test(issue_b, state_a)
+
+        stale_state = backdate_cached_log(state_b, :maturity_gate_log_decisions, issue_a.id)
+
+        {false, state_c} = Orchestrator.evaluate_dispatch_issue_for_test(issue_a, stale_state)
+        {false, _state_d} = Orchestrator.evaluate_dispatch_issue_for_test(issue_b, state_c)
+      end)
+
+    assert occurrences(log, "Maturity gate rejected dispatch") == 3
+    assert occurrences(log, "issue_identifier=ABC-GATED-A") == 2
+    assert occurrences(log, "issue_identifier=ABC-GATED-B") == 1
+  end
+
+  test "logs changed maturity gate decisions immediately inside the cache ttl" do
+    gated_issue =
+      issue(
+        id: "gated-dependent",
+        identifier: "ABC-GATED",
+        blocked_by: [blocker(id: "immature-blocker-a", identifier: "ABC-BLOCKER-A", state: "In Review")]
+      )
+
+    changed_issue = %{
+      gated_issue
+      | blocked_by: [blocker(id: "immature-blocker-b", identifier: "ABC-BLOCKER-B", state: "In Review")]
+    }
+
+    log =
+      capture_log(fn ->
+        {false, cached_state} = Orchestrator.evaluate_dispatch_issue_for_test(gated_issue, state())
+        {false, _changed_state} = Orchestrator.evaluate_dispatch_issue_for_test(changed_issue, cached_state)
+      end)
+
+    assert occurrences(log, "Maturity gate rejected dispatch") == 2
+    assert log =~ "identifier=ABC-BLOCKER-A"
+    assert log =~ "identifier=ABC-BLOCKER-B"
+  end
+
   test "logs out-of-scope maturity gate decisions without gating dispatch" do
     out_of_scope_issue =
       issue(
@@ -260,6 +317,62 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     refute log =~ "Maturity gate rejected dispatch"
 
     send(agent_pid, :stop)
+  end
+
+  test "re-logs unchanged dispatch rejections after the cache ttl per issue" do
+    running_issue = issue(id: "running-slot", identifier: "ABC-RUNNING")
+    agent_pid = sleeping_process()
+
+    on_exit(fn -> send(agent_pid, :stop) end)
+
+    exhausted_state =
+      state(%{
+        max_concurrent_agents: 1,
+        running: %{running_issue.id => running_entry(running_issue, agent_pid)}
+      })
+
+    slot_a = issue(id: "slot-dependent-a", identifier: "ABC-SLOT-A")
+    slot_b = issue(id: "slot-dependent-b", identifier: "ABC-SLOT-B")
+
+    log =
+      capture_log(fn ->
+        {false, state_a} = Orchestrator.evaluate_dispatch_issue_for_test(slot_a, exhausted_state)
+        {false, state_b} = Orchestrator.evaluate_dispatch_issue_for_test(slot_b, state_a)
+
+        stale_state = backdate_cached_log(state_b, :dispatch_rejections, slot_a.id)
+
+        {false, state_c} = Orchestrator.evaluate_dispatch_issue_for_test(slot_a, stale_state)
+        {false, _state_d} = Orchestrator.evaluate_dispatch_issue_for_test(slot_b, state_c)
+      end)
+
+    assert occurrences(log, "Dispatch candidate rejected") == 3
+    assert occurrences(log, "issue_identifier=ABC-SLOT-A") == 2
+    assert occurrences(log, "issue_identifier=ABC-SLOT-B") == 1
+  end
+
+  test "logs changed dispatch rejections immediately inside the cache ttl" do
+    running_issue = issue(id: "running-slot", identifier: "ABC-RUNNING")
+    rejected_issue = issue(id: "rejected-dependent", identifier: "ABC-REJECT")
+    agent_pid = sleeping_process()
+
+    on_exit(fn -> send(agent_pid, :stop) end)
+
+    exhausted_state =
+      state(%{
+        max_concurrent_agents: 1,
+        running: %{running_issue.id => running_entry(running_issue, agent_pid)}
+      })
+
+    log =
+      capture_log(fn ->
+        {false, cached_state} = Orchestrator.evaluate_dispatch_issue_for_test(rejected_issue, exhausted_state)
+        claimed_state = %{cached_state | running: %{}, claimed: MapSet.new([rejected_issue.id])}
+        {false, _changed_state} = Orchestrator.evaluate_dispatch_issue_for_test(rejected_issue, claimed_state)
+      end)
+
+    assert occurrences(log, "Dispatch candidate rejected") == 2
+    assert log =~ "reason=slot_exhausted"
+    assert log =~ "reason=already_claimed"
   end
 
   test "logs already claimed running and blocked dispatch rejections distinctly" do
@@ -473,6 +586,19 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
         overrides
       )
     )
+  end
+
+  defp backdate_cached_log(%Orchestrator.State{} = state, field, issue_id) do
+    update_in(state, [Access.key(field), issue_id], fn %{logged_at_ms: logged_at_ms} = cached ->
+      %{cached | logged_at_ms: logged_at_ms - @stale_cache_age_ms}
+    end)
+  end
+
+  defp occurrences(haystack, needle) do
+    haystack
+    |> String.split(needle)
+    |> length()
+    |> Kernel.-(1)
   end
 
   defp issue(overrides) do
