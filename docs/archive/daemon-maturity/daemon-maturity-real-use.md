@@ -112,8 +112,8 @@ agent:
 ```
 
 The team states and labels exist per
-`docs/symphony-plans/daemon-maturity-team-configuration.md`, but this checkpoint
-did not switch the live orchestrator to the fork's `main`.
+`docs/archive/daemon-maturity/daemon-maturity-team-configuration.md`, but this
+checkpoint did not switch the live orchestrator to the fork's `main`.
 
 Do not adopt `Inactive` for live fork-hosted tickets as part of this proof. This
 repository has no GitHub-to-Linear bridge workflows to release `waiting:*`
@@ -145,7 +145,7 @@ Owner: human operator / human lead Jeremy Carroll.
 
 Commands run for this documentation checkpoint:
 
-- `npx prettier --check docs/archive/daemon-maturity/example-project-completion-sentinel.md docs/archive/daemon-maturity/example-daemon-workpad-verdicts.md docs/archive/daemon-maturity/daemon-maturity-real-use.md`
+- `npx prettier --check docs/archive/daemon-maturity/project-completion-sentinel.md docs/archive/daemon-maturity/daemon-workpad-verdicts.md docs/archive/daemon-maturity/daemon-maturity-real-use.md`
   passed.
 - `mix deps.get` passed in `elixir/` to install dependencies needed by the local
   PR-body checker in this fresh clone.
@@ -169,7 +169,12 @@ The operator run still needs to record:
 - a daemon issue sleeping in `Happy` or `Unhappy`;
 - timer wake and lease into `Evaluating`;
 - agent verdict and return to `Happy` or `Unhappy`;
+- retry exhaustion restoring a daemon to its pre-lease resting state when that
+  state is known, or leaving it in dispatch for operator recovery when it is
+  not known;
 - maturity-gated dependent dispatch when a direct blocker carries `mature`;
+- release of a maturity-gated retry claim so a normal poll can re-evaluate the
+  dependent after the blocker matures;
 - maturity-regression advisory behavior if the blocker loses the label after
   dependent dispatch.
 
@@ -181,7 +186,8 @@ The operator run still needs to record:
 3. Select or create human-approved sentinel and maturity fixture issues.
 4. Let the sentinel sleep and wake by timer.
 5. Record Linear issue identifiers, workpad timestamps, state transitions,
-   daemon verdict, maturity label changes, advisory comments, restart evidence,
-   any fixes or reverts, and final result.
+   daemon verdict, retry-restoration behavior, maturity label changes, retry
+   claim release, advisory comments, restart evidence, any fixes or reverts, and
+   final result.
 6. If real use fails, fix or revert on `main`, restart the daemon, and record the
    recovery evidence.
