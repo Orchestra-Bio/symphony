@@ -82,6 +82,31 @@ defmodule SymphonyElixir.LinearClientDaemonCommentsTest do
     assert variables["relationFirst"] == 50
   end
 
+  test "daemon state fetch preserves configured casing in Linear state filter" do
+    with_linear_graphql_stub(
+      %{
+        "data" => %{
+          "issues" => %{
+            "nodes" => [],
+            "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+          }
+        }
+      },
+      fn endpoint ->
+        write_workflow_file!(Workflow.workflow_file_path(),
+          tracker_endpoint: endpoint,
+          tracker_project_slug: "daemon-project"
+        )
+
+        assert {:ok, []} = Client.fetch_issues_by_states(["Happy", "Unhappy"])
+      end
+    )
+
+    assert_receive {:linear_graphql_request, %{"query" => query, "variables" => variables}}
+    assert query =~ "state: {name: {in: $stateNames}}"
+    assert variables["stateNames"] == ["Happy", "Unhappy"]
+  end
+
   test "issue refetch by id preserves comment metadata and blocker labels" do
     graphql_fun = fn query, variables ->
       send(self(), {:fetch_issue_states_request, query, variables})

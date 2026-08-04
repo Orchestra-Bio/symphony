@@ -4,9 +4,9 @@ defmodule SymphonyElixir.DaemonWakeTest do
   alias SymphonyElixir.DaemonWake
 
   @config %{
-    daemon_states: ["happy", "unhappy"],
-    daemon_dispatch_states: ["evaluating"],
-    terminal_states: ["done", "canceled"],
+    daemon_states: ["Happy", "Unhappy"],
+    daemon_dispatch_states: ["Evaluating"],
+    terminal_states: ["Done", "Canceled"],
     daemon_default_wake: "4h"
   }
 

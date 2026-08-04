@@ -28,11 +28,11 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert Config.max_concurrent_agents_for_state("Todo") == 10
   end
 
-  test "daemon and maturity tracker config is normalized" do
+  test "daemon state filters preserve casing while comparison config is normalized" do
     write_daemon_workflow!(%{
       "active_states" => ["Todo", "Evaluating", "Review"],
       "terminal_states" => ["Done", "Canceled"],
-      "daemon_states" => [" Happy ", "UNHAPPY", "happy"],
+      "daemon_states" => [" Happy ", "Unhappy"],
       "daemon_dispatch_states" => [" Evaluating "],
       "daemon_default_wake" => " 4H ",
       "maturity_labels" => [" Mature ", "READY", "mature"],
@@ -41,11 +41,14 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
 
     config = Config.settings!()
 
-    assert config.tracker.daemon_states == ["happy", "unhappy"]
+    assert config.tracker.active_states == ["Todo", "Evaluating", "Review"]
+    assert config.tracker.terminal_states == ["Done", "Canceled"]
+    assert config.tracker.daemon_states == ["Happy", "Unhappy"]
     assert config.tracker.daemon_dispatch_states == ["evaluating"]
     assert config.tracker.daemon_default_wake == "4h"
     assert config.tracker.maturity_labels == ["mature", "ready"]
     assert config.tracker.maturity_gate_state_scope == ["todo", "review"]
+    assert Config.daemon_state_set() == MapSet.new(["Happy", "Unhappy"])
     assert Config.daemon_dispatch_target_state() == "evaluating"
   end
 
@@ -139,6 +142,7 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert Schema.reject_config_fields(changeset, nil, ["daemon_label"]) == changeset
     assert Schema.normalize_string_set(nil) == []
     assert Schema.normalize_string_set([:Todo, " In Progress ", :Todo]) == ["todo", "in progress"]
+    assert Schema.normalize_state_filter_set([:Todo, " In Progress ", :Todo]) == ["Todo", "In Progress"]
 
     tracker =
       Schema.Tracker.changeset(

@@ -24,7 +24,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
                [],
                state(),
                ~U[2026-07-26 09:30:00Z],
-               fetch_issues_by_states: fn ["happy", "unhappy"] -> {:ok, [daemon]} end,
+               fetch_issues_by_states: fn ["Happy", "Unhappy"] -> {:ok, [daemon]} end,
                update_issue_state: fn issue_id, state_name ->
                  send(self(), {:unexpected_lease, issue_id, state_name})
                  :ok
@@ -51,7 +51,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
                [],
                state(),
                ~U[2026-07-26 10:02:00Z],
-               fetch_issues_by_states: fn ["happy", "unhappy"] -> {:ok, [daemon]} end,
+               fetch_issues_by_states: fn ["Happy", "Unhappy"] -> {:ok, [daemon]} end,
                update_issue_state: fn "daemon-due", "Evaluating" ->
                  send(self(), {:leased, "daemon-due", "Evaluating"})
                  :ok
@@ -81,7 +81,7 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
                [],
                state(),
                ~U[2026-07-26 10:00:00Z],
-               fetch_issues_by_states: fn ["happy", "unhappy"] -> {:ok, [daemon]} end,
+               fetch_issues_by_states: fn ["Happy", "Unhappy"] -> {:ok, [daemon]} end,
                update_issue_state: fn issue_id, state_name ->
                  send(self(), {:unexpected_lease, issue_id, state_name})
                  :ok
