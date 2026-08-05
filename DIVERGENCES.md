@@ -5,7 +5,7 @@ This file records implemented behavior in the Orchestra fork of Symphony.
 fork-only dispatch rules.
 
 Behavior claims in this version were verified against
-`f948c8dc389bd3bd48803ad0121843644511b57b`.
+`a9deb3c993c1cc564a2496c2ac8917c07ee08ab8`.
 
 ## Team-Scoped Linear Dispatch
 
@@ -19,6 +19,10 @@ precedence; Linear tracker config is invalid when neither selector is present.
 daemon path. `tracker.daemon_dispatch_states` names daemon-only active states:
 the first value is the lease write target, and every configured value is
 recognized for daemon identity and recovery.
+
+Configure `daemon_states` with Linear's actual state-name casing. Symphony
+preserves those values for the Linear state filter while normalizing state names
+for internal daemon and maturity-gate comparisons.
 
 Operators force a daemon wake by moving the ticket to the first configured
 daemon dispatch state, not to an ordinary implementation-active state.
@@ -103,9 +107,11 @@ require available global, state, and worker capacity.
 ## Dispatch And Gate Observability
 
 The fork logs effective tracker config at startup and deduplicates repeated gate
-and dispatch decision logs in memory. The orchestrator snapshot and Phoenix
-dashboard expose maturity-gated and out-of-scope candidates with blocker state,
-labels, and gate reasons.
+and dispatch decision logs in memory. Unchanged per-issue decisions are
+suppressed for four hours, then logged again if still present.
+
+The orchestrator snapshot and Phoenix dashboard expose maturity-gated and
+out-of-scope candidates with blocker state, labels, and gate reasons.
 
 ## Plan-Side Stack Controls
 

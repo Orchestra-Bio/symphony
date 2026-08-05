@@ -4,7 +4,7 @@
 project_code: daemon-maturity
 ticket: ABC-291
 base_branch: main
-source_ref: f948c8dc389bd3bd48803ad0121843644511b57b
+source_ref: a9deb3c993c1cc564a2496c2ac8917c07ee08ab8
 ```
 
 ## Purpose
@@ -36,7 +36,8 @@ operator guidance; the root `DIVERGENCES.md` is the current behavior guide.
   PR #18 for maturity gating; PR #20 for history-based retry-exhaustion restore;
   PR #22 for maturity-gated retry-claim release; PR #23 for dispatch decision
   logging and slot-exhaustion visibility; and PR #24 for maturity-gate dashboard
-  visibility.
+  visibility; PR #25 for time-bounded dispatch log dedupe; PR #26 for dashboard
+  section order; and PR #27 for daemon-state filter casing.
 - PR #19 / ABC-290 status: open at source-read time. It writes three archive
   files directly to `docs/archive/daemon-maturity/` when it lands and records
   real-use verification as blocked on operator switchover to fork `main`.
@@ -49,6 +50,10 @@ operator guidance; the root `DIVERGENCES.md` is the current behavior guide.
   `orchestrator.ex`.
 - Rework implementation code at `f948c8dc389bd3bd48803ad0121843644511b57b`,
   especially `orchestrator.ex`, `maturity_gate.ex`, `presenter.ex`, and
+  `dashboard_live.ex`.
+- Current implementation code at `a9deb3c993c1cc564a2496c2ac8917c07ee08ab8`,
+  especially `config/schema.ex`, `linear/client.ex`, `daemon_wake.ex`,
+  `orchestrator.ex`, `maturity_gate.ex`, `presenter.ex`, and
   `dashboard_live.ex`.
 
 Unavailable sources: none.
@@ -72,6 +77,8 @@ Unavailable sources: none.
   `daemon_dispatch_states`, `daemon_default_wake`, `maturity_labels`, and
   `maturity_gate_state_scope`. `Config.Schema.Agent` keeps daemon capacity on
   `max_concurrent_agents_by_state`.
+- `daemon_states` preserves configured casing for Linear state-name filters,
+  while runtime daemon and maturity-gate comparisons normalize state names.
 - `Linear.Client` filters the `## Symphony Workpad` anchor server-side with
   `startsWithIgnoreCase`, reads `id` and `updatedAt`, and keeps comment body
   reads off the wake path.
@@ -91,8 +98,8 @@ Unavailable sources: none.
   for operator recovery when history is missing or unreadable.
 - `Orchestrator.maybe_dispatch/1` fetches visible candidates before dispatch
   capacity checks, records maturity-gate snapshot data from that poll, and logs
-  repeated gate or dispatch rejection decisions through an in-memory de-dup
-  cache.
+  repeated gate or dispatch rejection decisions through a four-hour in-memory
+  de-dup cache.
 - `MaturityGate.evaluate/2` is pure and direct-edge. It treats terminal
   blockers and configured maturity labels as satisfied, ignores daemon-state
   blockers with warnings, and returns `{:gated, blockers}` for unsatisfied
@@ -104,7 +111,9 @@ Unavailable sources: none.
 - `Orchestrator` emits one advisory comment per observed maturity regression
   without killing the running worker.
 - The dashboard API and Phoenix dashboard expose maturity-gated and out-of-scope
-  candidate snapshots with blocker state, labels, and gate reasons.
+  candidate snapshots with blocker state, labels, and gate reasons. The
+  LiveView places running sessions before rate limits, maturity gate, blocked
+  sessions, and retry queue.
 
 ## Archive Decision
 
