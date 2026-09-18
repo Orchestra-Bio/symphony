@@ -68,30 +68,32 @@ own and does not infer Happy or Unhappy.
 
 `tracker.maturity_labels` extends direct Linear blocker gating: a blocker is
 satisfied when it is terminal or carries one configured maturity label. An empty
-label list reproduces upstream terminal-only behavior.
+label list reproduces upstream terminal-only behavior across every active state.
 
 The gate is direct-edge only, reads Linear blocker state and labels, and does
 not inspect GitHub. Daemon-state blockers are ignored with a warning.
 
 ## Maturity Gate State Scope
 
-`tracker.maturity_gate_state_scope` limits which candidate states receive the
-blocker gate; its default is `["todo"]`. Out-of-scope means ungated, so removing
-`todo` also removes upstream's `Todo` blocker gate; use `maturity_labels: []` to
-disable maturity gating while preserving terminal-only blockers.
+Upstream applies its blocker gate only to `Todo` candidates. This fork applies
+the gate to every active-state dispatch candidate, including retry
+revalidation. `tracker.maturity_gate_state_scope` is accepted but ignored,
+pending removal in a follow-up change.
 
 ## Maturity-Gated Retry Claims
 
-A retry candidate that is still maturity-gated releases its in-memory claim for
-the normal poll path instead of waiting for a terminal state. If the failed
-attempt never started a session workspace, Symphony removes the pre-session
-workspace residue before releasing the claim.
+A retry candidate in any active state that is still maturity-gated releases its
+in-memory claim for the normal poll path. It remains in its tracker state with
+no worker until the blocker is terminal or mature. If the failed attempt never
+started a session workspace, Symphony removes the pre-session workspace residue
+before releasing the claim.
 
 ## Maturity Regression Advisory
 
 If a running dependent's blocker loses maturity, Symphony writes one advisory
-comment for the observed transition and leaves the worker running. If the
-dependent has not dispatched yet, it simply becomes ineligible again.
+comment and leaves the worker running. Every later dispatch, including retry,
+is gated until the blocker is terminal or mature again. Reopening a Done blocker
+does not currently produce an advisory.
 
 ## Daemon Dispatch Budgeting
 

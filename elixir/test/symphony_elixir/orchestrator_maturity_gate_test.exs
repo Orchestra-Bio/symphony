@@ -100,8 +100,8 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     active_issue =
       issue(
         id: "active-dependent",
-        identifier: "ABC-OUT",
-        title: "Out of scope dependent",
+        identifier: "ABC-ACTIVE",
+        title: "Active dependent",
         state: "In Progress",
         blocked_by: [immature_blocker]
       )
@@ -127,8 +127,8 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
                blockers: gated_blockers
              },
              %{
-               identifier: "ABC-OUT",
-               title: "Out of scope dependent",
+               identifier: "ABC-ACTIVE",
+               title: "Active dependent",
                state: "In Progress",
                status: :gated,
                scope: :in_scope,
@@ -411,9 +411,29 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     send(agent_pid, :stop)
   end
 
+  test "running gated ticket remains running in the snapshot and dispatch log" do
+    issue = issue(id: "running-gated", identifier: "ABC-RUNNING-GATED", blocked_by: [blocker(state: "In Review")])
+    agent_pid = sleeping_process()
+
+    on_exit(fn -> send(agent_pid, :stop) end)
+
+    running_state = state(%{running: %{issue.id => running_entry(issue, agent_pid)}})
+    snapshot = Orchestrator.maturity_gate_snapshot_for_test([issue], running_state)
+
+    assert snapshot.gated == []
+
+    log =
+      capture_log(fn ->
+        assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(issue, running_state)
+      end)
+
+    assert log =~ "reason=already_running"
+    refute log =~ "Maturity gate rejected dispatch"
+  end
+
   test "retry lookup uses the shared maturity gate" do
     issue_id = "retry-dependent"
-    immature = issue(id: issue_id, identifier: "ABC-RETRY", blocked_by: [blocker(state: "In Review")])
+    immature = issue(id: issue_id, identifier: "ABC-RETRY", state: "In Progress", blocked_by: [blocker(state: "In Review")])
     mature = %{immature | blocked_by: [blocker(state: "In Review", labels: ["mature"])]}
 
     claimed_state = state(%{max_concurrent_agents: 0, claimed: MapSet.new([issue_id])})

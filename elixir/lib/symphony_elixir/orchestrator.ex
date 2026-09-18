@@ -936,15 +936,29 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp maturity_gate_dispatch_decision(%Issue{} = issue, %State{} = state, context, %MaturityGate{} = gate_decision) do
+    case dispatch_ownership_rejection(issue, state) do
+      {reason, details} ->
+        %{
+          dispatch: false,
+          rejection_log: dispatch_rejection_log(issue, reason, details),
+          maturity_gate_logs: []
+        }
+
+      nil ->
+        maturity_gate_dispatch_decision_after_ownership(issue, state, context, gate_decision)
+    end
+  end
+
+  defp maturity_gate_dispatch_decision(%Issue{} = issue, %State{}, _context, nil) do
+    raise ArgumentError, "missing maturity gate decision for dispatch candidate #{issue_context(issue)}"
+  end
+
+  defp maturity_gate_dispatch_decision_after_ownership(issue, state, context, gate_decision) do
     maturity_gate_logs = maturity_gate_logs(issue, gate_decision, context.maturity_gate_config)
 
     case MaturityGate.result(gate_decision) do
       {:gated, _blockers} ->
-        %{
-          dispatch: false,
-          rejection_log: nil,
-          maturity_gate_logs: maturity_gate_logs
-        }
+        %{dispatch: false, rejection_log: nil, maturity_gate_logs: maturity_gate_logs}
 
       _result ->
         case dispatch_rejection(issue, state, context) do
@@ -959,10 +973,6 @@ defmodule SymphonyElixir.Orchestrator do
             }
         end
     end
-  end
-
-  defp maturity_gate_dispatch_decision(%Issue{} = issue, %State{}, _context, nil) do
-    raise ArgumentError, "missing maturity gate decision for dispatch candidate #{issue_context(issue)}"
   end
 
   defp candidate_rejection(
@@ -1003,19 +1013,17 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp dispatch_rejection(
          %Issue{} = issue,
-         %State{running: running, claimed: claimed, blocked: blocked} = state,
+         %State{} = state,
          context
        ) do
+    case dispatch_ownership_rejection(issue, state) do
+      nil -> dispatch_capacity_rejection(issue, state, context)
+      rejection -> rejection
+    end
+  end
+
+  defp dispatch_capacity_rejection(%Issue{} = issue, %State{running: running} = state, context) do
     cond do
-      Map.has_key?(running, issue.id) ->
-        {:already_running, %{}}
-
-      Map.has_key?(blocked, issue.id) ->
-        {:already_blocked, %{error: blocked_issue_error(blocked, issue.id)}}
-
-      MapSet.member?(claimed, issue.id) ->
-        {:already_claimed, %{}}
-
       available_slots(state, context) <= 0 ->
         max_concurrent_agents = state.max_concurrent_agents || context.config.agent.max_concurrent_agents
 
@@ -1045,6 +1053,15 @@ defmodule SymphonyElixir.Orchestrator do
 
       true ->
         nil
+    end
+  end
+
+  defp dispatch_ownership_rejection(%Issue{} = issue, %State{running: running, claimed: claimed, blocked: blocked}) do
+    cond do
+      Map.has_key?(running, issue.id) -> {:already_running, %{}}
+      Map.has_key?(blocked, issue.id) -> {:already_blocked, %{error: blocked_issue_error(blocked, issue.id)}}
+      MapSet.member?(claimed, issue.id) -> {:already_claimed, %{}}
+      true -> nil
     end
   end
 
@@ -1253,6 +1270,7 @@ defmodule SymphonyElixir.Orchestrator do
     issue_decisions =
       issues
       |> Enum.filter(&candidate_issue?(&1, context))
+      |> Enum.reject(fn %Issue{id: id} -> Map.has_key?(state.running, id) or Map.has_key?(state.blocked, id) end)
       |> Enum.map(fn %Issue{} = issue ->
         %{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}
       end)
@@ -1469,6 +1487,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp maybe_lease_daemon(%Issue{} = issue, %State{} = state, opts, context) do
     with target_state when is_binary(target_state) <- daemon_dispatch_target_state_name(context),
          leased_issue = %Issue{issue | state: target_state},
+         true <- maturity_gate_allows?(leased_issue, context),
          true <- dispatch_slots_available?(leased_issue, state, context),
          true <- any_worker_slots_available?(state, context),
          :ok <- update_issue_state(opts, issue.id, target_state),
