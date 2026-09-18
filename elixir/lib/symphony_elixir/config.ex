@@ -78,12 +78,6 @@ defmodule SymphonyElixir.Config do
     |> MapSet.new()
   end
 
-  @spec maturity_gate_state_scope_set() :: MapSet.t()
-  def maturity_gate_state_scope_set do
-    settings!().tracker.maturity_gate_state_scope
-    |> MapSet.new()
-  end
-
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
   def codex_turn_sandbox_policy(workspace \\ nil) do
     case Schema.resolve_runtime_turn_sandbox_policy(settings!(), workspace) do

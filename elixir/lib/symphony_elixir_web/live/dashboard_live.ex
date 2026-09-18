@@ -233,10 +233,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_labels) %></span>
             </div>
             <div class="config-item">
-              <span class="config-label">maturity_gate_state_scope</span>
-              <span class="config-value"><%= format_list(@payload.maturity_gate.config.maturity_gate_state_scope) %></span>
-            </div>
-            <div class="config-item">
               <span class="config-label">daemon_states</span>
               <span class="config-value"><%= format_list(@payload.maturity_gate.config.daemon_states) %></span>
             </div>
@@ -255,14 +251,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
             />
           </div>
 
-          <div class="gate-subsection">
-            <h3 class="subsection-title">Out of gate scope</h3>
-            <.maturity_gate_table
-              entries={@payload.maturity_gate.out_of_scope}
-              blocker_header="Visible blockers"
-              empty="No blocked candidate issues are bypassing the gate through state scope."
-            />
-          </div>
         </section>
 
         <section class="section-card">
@@ -563,7 +551,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
       "satisfied" -> "#{base} gate-status-satisfied"
       "gating" -> "#{base} gate-status-gating"
       "ignored" -> "#{base} gate-status-ignored"
-      "out_of_scope" -> "#{base} gate-status-out-of-scope"
       _ -> base
     end
   end
@@ -571,7 +558,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp format_gate_status("satisfied"), do: "Satisfied"
   defp format_gate_status("gating"), do: "Gating"
   defp format_gate_status("ignored"), do: "Ignored"
-  defp format_gate_status("out_of_scope"), do: "Out of scope"
   defp format_gate_status(status) when is_binary(status), do: status
   defp format_gate_status(_status), do: "n/a"
 

@@ -73,13 +73,6 @@ label list reproduces upstream terminal-only behavior across every active state.
 The gate is direct-edge only, reads Linear blocker state and labels, and does
 not inspect GitHub. Daemon-state blockers are ignored with a warning.
 
-## Maturity Gate State Scope
-
-Upstream applies its blocker gate only to `Todo` candidates. This fork applies
-the gate to every active-state dispatch candidate, including retry
-revalidation. `tracker.maturity_gate_state_scope` is accepted but ignored,
-pending removal in a follow-up change.
-
 ## Maturity-Gated Retry Claims
 
 A retry candidate in any active state that is still maturity-gated releases its
@@ -112,8 +105,8 @@ The fork logs effective tracker config at startup and deduplicates repeated gate
 and dispatch decision logs in memory. Unchanged per-issue decisions are
 suppressed for four hours, then logged again if still present.
 
-The orchestrator snapshot and Phoenix dashboard expose maturity-gated and
-out-of-scope candidates with blocker state, labels, and gate reasons.
+The orchestrator snapshot and Phoenix dashboard expose maturity-gated
+candidates with blocker state, labels, and gate reasons.
 
 ## Plan-Side Stack Controls
 

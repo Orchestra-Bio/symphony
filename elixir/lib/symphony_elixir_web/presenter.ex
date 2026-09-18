@@ -157,8 +157,7 @@ defmodule SymphonyElixirWeb.Presenter do
       evaluated_at: iso8601(Map.get(snapshot, :evaluated_at)),
       error: maturity_gate_error(Map.get(snapshot, :error)),
       config: maturity_gate_config_payload(Map.get(snapshot, :config, %{})),
-      gated: Enum.map(Map.get(snapshot, :gated, []), &maturity_gate_issue_payload/1),
-      out_of_scope: Enum.map(Map.get(snapshot, :out_of_scope, []), &maturity_gate_issue_payload/1)
+      gated: Enum.map(Map.get(snapshot, :gated, []), &maturity_gate_issue_payload/1)
     }
   end
 
@@ -167,15 +166,13 @@ defmodule SymphonyElixirWeb.Presenter do
       evaluated_at: nil,
       error: nil,
       config: maturity_gate_config_payload(%{}),
-      gated: [],
-      out_of_scope: []
+      gated: []
     }
   end
 
   defp maturity_gate_config_payload(config) when is_map(config) do
     %{
       maturity_labels: string_list(Map.get(config, :maturity_labels, [])),
-      maturity_gate_state_scope: string_list(Map.get(config, :maturity_gate_state_scope, [])),
       daemon_states: string_list(Map.get(config, :daemon_states, [])),
       terminal_states: string_list(Map.get(config, :terminal_states, []))
     }
@@ -195,7 +192,6 @@ defmodule SymphonyElixirWeb.Presenter do
       title: Map.get(entry, :title),
       state: Map.get(entry, :state),
       status: atom_name(Map.get(entry, :status)),
-      scope: atom_name(Map.get(entry, :scope)),
       blockers: Enum.map(Map.get(entry, :blockers, []), &maturity_gate_blocker_payload/1)
     }
   end
@@ -286,7 +282,6 @@ defmodule SymphonyElixirWeb.Presenter do
   defp summarize_message(nil), do: nil
   defp summarize_message(message), do: StatusDashboard.humanize_codex_message(message)
 
-  defp maturity_gate_reason_text(["out_of_gate_scope"]), do: "dependent state is out of gate scope"
   defp maturity_gate_reason_text(["terminal"]), do: "terminal"
   defp maturity_gate_reason_text(["maturity_label"]), do: "carries a maturity label"
   defp maturity_gate_reason_text(["daemon_state"]), do: "ignored as a daemon-state blocker"
