@@ -63,6 +63,32 @@ defmodule SymphonyElixir.OrchestratorDaemonLifecycleTest do
     assert updated_state.running == %{}
   end
 
+  test "due daemon with an immature blocker is not leased" do
+    daemon =
+      issue(%{
+        id: "daemon-gated",
+        identifier: "ABC-288-GATED",
+        state: "Unhappy",
+        labels: ["wake:1h"],
+        comments: [comment("workpad-gated", ~U[2026-07-26 09:00:00Z])],
+        blocked_by: [%{id: "blocker", identifier: "ABC-BLOCKER", state: "In Progress", labels: []}]
+      })
+
+    assert {:ok, []} =
+             Orchestrator.append_due_daemon_candidates_for_test(
+               [],
+               state(),
+               ~U[2026-07-26 10:02:00Z],
+               fetch_issues_by_states: fn ["Happy", "Unhappy"] -> {:ok, [daemon]} end,
+               update_issue_state: fn issue_id, state_name ->
+                 send(self(), {:unexpected_lease, issue_id, state_name})
+                 :ok
+               end
+             )
+
+    refute_receive {:unexpected_lease, _, _}, 50
+  end
+
   test "daemon sleep candidates create missing workpad anchors before wake evaluation" do
     Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
 

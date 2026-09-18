@@ -63,7 +63,6 @@ defmodule SymphonyElixir.Config.Schema do
       field(:daemon_dispatch_states, {:array, :string}, default: [])
       field(:daemon_default_wake, :string, default: "1h")
       field(:maturity_labels, {:array, :string}, default: [])
-      field(:maturity_gate_state_scope, {:array, :string}, default: ["todo"])
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -84,8 +83,7 @@ defmodule SymphonyElixir.Config.Schema do
           :daemon_states,
           :daemon_dispatch_states,
           :daemon_default_wake,
-          :maturity_labels,
-          :maturity_gate_state_scope
+          :maturity_labels
         ],
         empty_values: []
       )
@@ -101,12 +99,10 @@ defmodule SymphonyElixir.Config.Schema do
       |> update_change(:daemon_dispatch_states, &Schema.normalize_string_set/1)
       |> update_change(:daemon_default_wake, &Schema.normalize_issue_state/1)
       |> update_change(:maturity_labels, &Schema.normalize_string_set/1)
-      |> update_change(:maturity_gate_state_scope, &Schema.normalize_string_set/1)
       |> validate_inclusion(:daemon_default_wake, @supported_daemon_default_wakes)
       |> Schema.validate_string_set(:daemon_states)
       |> Schema.validate_string_set(:daemon_dispatch_states)
       |> Schema.validate_string_set(:maturity_labels)
-      |> Schema.validate_string_set(:maturity_gate_state_scope)
       |> validate_daemon_state_contract()
     end
 

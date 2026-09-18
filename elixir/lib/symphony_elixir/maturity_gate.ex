@@ -5,25 +5,23 @@ defmodule SymphonyElixir.MaturityGate do
 
   alias SymphonyElixir.Linear.Issue
 
-  defstruct status: :eligible, scope: :in_scope, blockers: [], warnings: [], blocker_decisions: []
+  defstruct status: :eligible, blockers: [], warnings: [], blocker_decisions: []
 
   @type warning :: {:daemon_blocker_ignored, Issue.blocker_ref()}
   @type blocker_reason ::
-          :terminal | :maturity_label | :not_terminal | :missing_maturity_label | :daemon_state | :out_of_gate_scope
+          :terminal | :maturity_label | :not_terminal | :missing_maturity_label | :daemon_state
   @type blocker_decision :: %{
           blocker: Issue.blocker_ref(),
-          status: :satisfied | :gating | :ignored | :out_of_scope,
+          status: :satisfied | :gating | :ignored,
           reasons: [blocker_reason()]
         }
   @type config :: %{
           optional(:terminal_states) => [String.t()],
           optional(:daemon_states) => [String.t()],
-          optional(:maturity_labels) => [String.t()],
-          optional(:maturity_gate_state_scope) => [String.t()]
+          optional(:maturity_labels) => [String.t()]
         }
   @type t :: %__MODULE__{
           status: :eligible | :gated,
-          scope: :in_scope | :out_of_scope,
           blockers: [Issue.blocker_ref()],
           warnings: [warning()],
           blocker_decisions: [blocker_decision()]
@@ -31,12 +29,7 @@ defmodule SymphonyElixir.MaturityGate do
   @type result :: :eligible | {:eligible_with_warnings, [warning()]} | {:gated, [Issue.blocker_ref()]}
 
   @spec evaluate(Issue.t(), config()) :: t()
-  def evaluate(%Issue{} = issue, %{} = config) do
-    case issue_in_scope?(issue, config) do
-      true -> scoped_decision(issue, config)
-      false -> out_of_scope_decision(issue)
-    end
-  end
+  def evaluate(%Issue{} = issue, %{} = config), do: scoped_decision(issue, config)
 
   @spec result(t()) :: result()
   def result(%__MODULE__{status: :gated, blockers: blockers}), do: {:gated, blockers}
@@ -66,16 +59,6 @@ defmodule SymphonyElixir.MaturityGate do
     }
   end
 
-  defp out_of_scope_decision(%Issue{} = issue) do
-    %__MODULE__{
-      scope: :out_of_scope,
-      blocker_decisions:
-        Enum.map(issue.blocked_by, fn blocker ->
-          %{blocker: blocker, status: :out_of_scope, reasons: [:out_of_gate_scope]}
-        end)
-    }
-  end
-
   defp gating_blocker(%{status: :gating, blocker: blocker}), do: [blocker]
   defp gating_blocker(_decision), do: []
 
@@ -98,13 +81,6 @@ defmodule SymphonyElixir.MaturityGate do
       nil -> false
       previous_blocker -> maturity_regressed?(previous_blocker, blocker, config, maturity_labels)
     end
-  end
-
-  defp issue_in_scope?(%Issue{state: state}, config) do
-    # Out-of-scope issues are ungated; removing "todo" also removes the
-    # upstream terminal-only blocker gate for Todo issues.
-    scope = normalized_values(Map.get(config, :maturity_gate_state_scope, []))
-    normalize_string(state) in scope
   end
 
   defp blocker_decision(blocker, config) when is_map(blocker) do

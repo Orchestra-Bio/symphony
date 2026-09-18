@@ -3,7 +3,7 @@ defmodule SymphonyElixir.MaturityGateTest do
 
   alias SymphonyElixir.MaturityGate
 
-  test "empty maturity labels keep terminal-only blocker behavior in scoped states" do
+  test "empty maturity labels keep terminal-only blocker behavior" do
     config = config(maturity_labels: [])
 
     done_blocker = blocker(id: "blocker-done", state: "Done")
@@ -18,7 +18,7 @@ defmodule SymphonyElixir.MaturityGateTest do
     assert MaturityGate.result(decision) == {:gated, [active_blocker]}
   end
 
-  test "default scope preserves Todo-only gating and widened scope gates additional candidate states" do
+  test "direct blockers are gated regardless of dependent issue state" do
     immature_blocker = blocker(id: "blocker-review", state: "In Review")
 
     default_config = config()
@@ -26,28 +26,16 @@ defmodule SymphonyElixir.MaturityGateTest do
     assert %MaturityGate{status: :gated} =
              MaturityGate.evaluate(issue(state: "Todo", blocked_by: [immature_blocker]), default_config)
 
-    assert %MaturityGate{status: :eligible} =
+    assert %MaturityGate{status: :gated} =
              MaturityGate.evaluate(issue(state: "In Progress", blocked_by: [immature_blocker]), default_config)
 
-    widened_config = config(maturity_gate_state_scope: ["todo", "in progress"])
-
     assert %MaturityGate{status: :gated} =
-             MaturityGate.evaluate(issue(state: "In Progress", blocked_by: [immature_blocker]), widened_config)
+             MaturityGate.evaluate(issue(state: "In Progress", blocked_by: [immature_blocker]), default_config)
 
     mature_blocker = %{immature_blocker | labels: ["mature"]}
 
     assert %MaturityGate{status: :eligible} =
-             MaturityGate.evaluate(issue(state: "In Progress", blocked_by: [mature_blocker]), widened_config)
-  end
-
-  test "empty scope leaves issues ungated even when blockers are non-terminal" do
-    immature_blocker = blocker(id: "blocker-review", state: "In Review")
-
-    assert %MaturityGate{status: :eligible, blockers: [], warnings: []} =
-             MaturityGate.evaluate(
-               issue(state: "Todo", blocked_by: [immature_blocker]),
-               config(maturity_gate_state_scope: [])
-             )
+             MaturityGate.evaluate(issue(state: "In Progress", blocked_by: [mature_blocker]), default_config)
   end
 
   test "mature direct blockers open depth two and compose in depth three without transitive checks" do
@@ -88,7 +76,7 @@ defmodule SymphonyElixir.MaturityGateTest do
     assert MaturityGate.result(gated) == {:gated, [immature_blocker]}
   end
 
-  test "decisions explain satisfied, gating, ignored, and out-of-scope blockers" do
+  test "decisions explain satisfied, gating, and ignored blockers in every active state" do
     terminal_blocker = blocker(id: "done", identifier: "ABC-DONE", state: "Done")
     mature_blocker = blocker(id: "mature", identifier: "ABC-MATURE", state: "In Review", labels: ["mature"])
     immature_blocker = blocker(id: "immature", identifier: "ABC-IMMATURE", state: "In Review")
@@ -101,7 +89,6 @@ defmodule SymphonyElixir.MaturityGateTest do
       )
 
     assert decision.status == :gated
-    assert decision.scope == :in_scope
     assert decision.blockers == [immature_blocker]
 
     assert Enum.map(decision.blocker_decisions, &{&1.blocker.identifier, &1.status, &1.reasons}) == [
@@ -111,15 +98,14 @@ defmodule SymphonyElixir.MaturityGateTest do
              {"ABC-DAEMON", :ignored, [:daemon_state]}
            ]
 
-    out_of_scope =
+    active_decision =
       MaturityGate.evaluate(
         issue(state: "In Progress", blocked_by: [immature_blocker]),
         config()
       )
 
-    assert out_of_scope.status == :eligible
-    assert out_of_scope.scope == :out_of_scope
-    assert [%{status: :out_of_scope, reasons: [:out_of_gate_scope]}] = out_of_scope.blocker_decisions
+    assert active_decision.status == :gated
+    assert [%{status: :gating, reasons: [:not_terminal, :missing_maturity_label]}] = active_decision.blocker_decisions
   end
 
   test "unknown blockers remain gated" do
@@ -163,8 +149,7 @@ defmodule SymphonyElixir.MaturityGateTest do
     defaults = %{
       terminal_states: ["done", "canceled"],
       daemon_states: ["Happy", "Unhappy"],
-      maturity_labels: ["mature"],
-      maturity_gate_state_scope: ["todo"]
+      maturity_labels: ["mature"]
     }
 
     Map.merge(defaults, Map.new(overrides))
