@@ -62,7 +62,7 @@ defmodule SymphonyElixir.Orchestrator do
       retry_attempts: %{},
       dispatch_rejections: %{},
       maturity_gate_log_decisions: %{},
-      maturity_gate_snapshot: %{gated: [], out_of_scope: [], evaluated_at: nil, error: nil},
+      maturity_gate_snapshot: %{gated: [], evaluated_at: nil, error: nil},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -1132,7 +1132,6 @@ defmodule SymphonyElixir.Orchestrator do
   defp maturity_gate_config_context(config) when is_map(config) do
     [
       "maturity_labels=#{inspect(Map.get(config, :maturity_labels, []))}",
-      "maturity_gate_state_scope=#{inspect(Map.get(config, :maturity_gate_state_scope, []))}",
       "daemon_states=#{inspect(Map.get(config, :daemon_states, []))}",
       "terminal_states=#{inspect(Map.get(config, :terminal_states, []))}"
     ]
@@ -1148,16 +1147,6 @@ defmodule SymphonyElixir.Orchestrator do
       {:info,
        "Maturity gate rejected dispatch: #{issue_context(issue)} dependent_state=#{inspect(issue.state)} " <>
          "blockers=#{blockers_context(decision.blockers)} #{maturity_gate_config_context(config)}"}
-      | maturity_gate_warning_logs(issue, decision.warnings)
-    ]
-  end
-
-  defp maturity_gate_logs(%Issue{} = issue, %MaturityGate{scope: :out_of_scope} = decision, config) do
-    [
-      {:info,
-       "Maturity gate skipped; issue out of gate scope: #{issue_context(issue)} " <>
-         "dependent_state=#{inspect(issue.state)} blocked_by=#{length(issue.blocked_by)} " <>
-         "#{maturity_gate_config_context(config)}"}
       | maturity_gate_warning_logs(issue, decision.warnings)
     ]
   end
@@ -1261,8 +1250,7 @@ defmodule SymphonyElixir.Orchestrator do
     %{
       terminal_states: Enum.sort(terminal_states),
       daemon_states: tracker.daemon_states,
-      maturity_labels: tracker.maturity_labels,
-      maturity_gate_state_scope: tracker.maturity_gate_state_scope
+      maturity_labels: tracker.maturity_labels
     }
   end
 
@@ -1283,7 +1271,6 @@ defmodule SymphonyElixir.Orchestrator do
       state
       | maturity_gate_snapshot: %{
           gated: maturity_gate_issue_decisions(snapshot_issue_decisions, :gated),
-          out_of_scope: maturity_gate_issue_decisions(snapshot_issue_decisions, :out_of_scope),
           evaluated_at: DateTime.utc_now(),
           error: nil
         }
@@ -1312,7 +1299,6 @@ defmodule SymphonyElixir.Orchestrator do
       state
       | maturity_gate_snapshot: %{
           gated: [],
-          out_of_scope: [],
           evaluated_at: nil,
           error: inspect(reason)
         }
@@ -1328,15 +1314,6 @@ defmodule SymphonyElixir.Orchestrator do
     |> Enum.map(&maturity_gate_issue_decision/1)
   end
 
-  defp maturity_gate_issue_decisions(issue_decisions, :out_of_scope) do
-    issue_decisions
-    |> Enum.filter(fn
-      %{issue: %Issue{blocked_by: blockers}, decision: %MaturityGate{scope: :out_of_scope}} when blockers != [] -> true
-      _entry -> false
-    end)
-    |> Enum.map(&maturity_gate_issue_decision/1)
-  end
-
   defp maturity_gate_issue_decision(%{issue: %Issue{} = issue, decision: %MaturityGate{} = decision}) do
     %{
       issue_id: issue.id,
@@ -1345,7 +1322,6 @@ defmodule SymphonyElixir.Orchestrator do
       state: issue.state,
       issue_url: issue.url,
       status: decision.status,
-      scope: decision.scope,
       blockers: Enum.map(decision.blocker_decisions, &maturity_gate_blocker_decision/1),
       warnings: decision.warnings
     }
@@ -2371,7 +2347,6 @@ defmodule SymphonyElixir.Orchestrator do
       config: context.maturity_gate_config,
       evaluated_at: Map.get(snapshot, :evaluated_at),
       gated: Map.get(snapshot, :gated, []),
-      out_of_scope: Map.get(snapshot, :out_of_scope, []),
       error: Map.get(snapshot, :error)
     }
   end
@@ -2516,8 +2491,7 @@ defmodule SymphonyElixir.Orchestrator do
         "daemon_states=#{inspect(tracker.daemon_states)} " <>
         "daemon_dispatch_states=#{inspect(tracker.daemon_dispatch_states)} " <>
         "daemon_default_wake=#{inspect(tracker.daemon_default_wake)} " <>
-        "maturity_labels=#{inspect(tracker.maturity_labels)} " <>
-        "maturity_gate_state_scope=#{inspect(tracker.maturity_gate_state_scope)}"
+        "maturity_labels=#{inspect(tracker.maturity_labels)}"
     )
   end
 

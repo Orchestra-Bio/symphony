@@ -529,8 +529,7 @@ pre,
   color: var(--danger);
 }
 
-.gate-status-ignored,
-.gate-status-out-of-scope {
+.gate-status-ignored {
   background: #eef4ff;
   border-color: #c7d7fe;
   color: #344054;

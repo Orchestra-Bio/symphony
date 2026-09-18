@@ -5,25 +5,23 @@ defmodule SymphonyElixir.MaturityGate do
 
   alias SymphonyElixir.Linear.Issue
 
-  defstruct status: :eligible, scope: :in_scope, blockers: [], warnings: [], blocker_decisions: []
+  defstruct status: :eligible, blockers: [], warnings: [], blocker_decisions: []
 
   @type warning :: {:daemon_blocker_ignored, Issue.blocker_ref()}
   @type blocker_reason ::
-          :terminal | :maturity_label | :not_terminal | :missing_maturity_label | :daemon_state | :out_of_gate_scope
+          :terminal | :maturity_label | :not_terminal | :missing_maturity_label | :daemon_state
   @type blocker_decision :: %{
           blocker: Issue.blocker_ref(),
-          status: :satisfied | :gating | :ignored | :out_of_scope,
+          status: :satisfied | :gating | :ignored,
           reasons: [blocker_reason()]
         }
   @type config :: %{
           optional(:terminal_states) => [String.t()],
           optional(:daemon_states) => [String.t()],
-          optional(:maturity_labels) => [String.t()],
-          optional(:maturity_gate_state_scope) => [String.t()]
+          optional(:maturity_labels) => [String.t()]
         }
   @type t :: %__MODULE__{
           status: :eligible | :gated,
-          scope: :in_scope | :out_of_scope,
           blockers: [Issue.blocker_ref()],
           warnings: [warning()],
           blocker_decisions: [blocker_decision()]

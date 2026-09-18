@@ -17,13 +17,11 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert config.tracker.daemon_dispatch_states == []
     assert config.tracker.daemon_default_wake == "1h"
     assert config.tracker.maturity_labels == []
-    assert config.tracker.maturity_gate_state_scope == ["todo"]
 
     assert Config.daemon_dispatch_state_set() == MapSet.new()
     assert Config.daemon_dispatch_target_state() == nil
     assert Config.daemon_default_wake() == "1h"
     assert Config.maturity_label_set() == MapSet.new()
-    assert Config.maturity_gate_state_scope_set() == MapSet.new(["todo"])
     assert Config.max_concurrent_agents_for_state("Todo") == 10
   end
 
@@ -34,8 +32,7 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
       "daemon_states" => [" Happy ", "UNHAPPY", "happy"],
       "daemon_dispatch_states" => [" Evaluating "],
       "daemon_default_wake" => " 4H ",
-      "maturity_labels" => [" Mature ", "READY", "mature"],
-      "maturity_gate_state_scope" => [" Todo ", "REVIEW"]
+      "maturity_labels" => [" Mature ", "READY", "mature"]
     })
 
     config = Config.settings!()
@@ -46,7 +43,6 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
     assert config.tracker.daemon_dispatch_states == ["evaluating"]
     assert config.tracker.daemon_default_wake == "4h"
     assert config.tracker.maturity_labels == ["mature", "ready"]
-    assert config.tracker.maturity_gate_state_scope == ["todo", "review"]
     assert Config.daemon_dispatch_target_state() == "evaluating"
   end
 
@@ -123,12 +119,6 @@ defmodule SymphonyElixir.DaemonMaturityConfigTest do
 
     assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
     assert message =~ "tracker.maturity_labels"
-    assert message =~ "entries must not be blank"
-
-    write_daemon_workflow!(%{"maturity_gate_state_scope" => ["todo", ""]})
-
-    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
-    assert message =~ "tracker.maturity_gate_state_scope"
     assert message =~ "entries must not be blank"
   end
 

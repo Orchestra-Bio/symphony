@@ -47,25 +47,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
              )
   end
 
-  test "candidate selection gates active states regardless of configured scope" do
-    write_maturity_workflow!(maturity_gate_state_scope: ["todo", "in progress"])
-
-    immature_blocker = blocker(id: "blocker-immature", state: "In Review")
-    mature_blocker = %{immature_blocker | labels: ["mature"]}
-
-    assert {false, _state} =
-             Orchestrator.evaluate_dispatch_issue_for_test(
-               issue(id: "progress-gated", state: "In Progress", blocked_by: [immature_blocker]),
-               state()
-             )
-
-    assert {true, _state} =
-             Orchestrator.evaluate_dispatch_issue_for_test(
-               issue(id: "progress-mature", state: "In Progress", blocked_by: [mature_blocker]),
-               state()
-             )
-  end
-
   test "candidate selection ignores daemon-state blockers with a warning" do
     daemon_blocker = blocker(id: "daemon-blocker", identifier: "ABC-DAEMON", state: "Happy")
 
@@ -111,8 +92,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert snapshot.config == %{
              terminal_states: ["canceled", "done"],
              daemon_states: ["Happy", "Unhappy"],
-             maturity_labels: ["mature"],
-             maturity_gate_state_scope: ["todo"]
+             maturity_labels: ["mature"]
            }
 
     assert %DateTime{} = snapshot.evaluated_at
@@ -123,7 +103,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
                title: "Gated dependent",
                state: "Todo",
                status: :gated,
-               scope: :in_scope,
                blockers: gated_blockers
              },
              %{
@@ -131,7 +110,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
                title: "Active dependent",
                state: "In Progress",
                status: :gated,
-               scope: :in_scope,
                blockers: [%{identifier: "ABC-IMMATURE", status: :gating, reasons: [:not_terminal, :missing_maturity_label]}]
              }
            ] = snapshot.gated
@@ -142,8 +120,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
              {"ABC-IMMATURE", :gating, [:not_terminal, :missing_maturity_label]},
              {"ABC-DAEMON", :ignored, [:daemon_state]}
            ]
-
-    assert snapshot.out_of_scope == []
   end
 
   test "poll updates maturity gate snapshot even when dispatch slots are full" do
@@ -181,7 +157,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
 
     previous_snapshot = %{
       gated: [%{identifier: "ABC-OLD"}],
-      out_of_scope: [%{identifier: "ABC-SCOPE"}],
       evaluated_at: ~U[2026-08-02 17:00:00Z],
       error: nil
     }
@@ -189,7 +164,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     updated_state = Orchestrator.maybe_dispatch_for_test(state(%{maturity_gate_snapshot: previous_snapshot}))
 
     assert updated_state.maturity_gate_snapshot.gated == []
-    assert updated_state.maturity_gate_snapshot.out_of_scope == []
     assert updated_state.maturity_gate_snapshot.evaluated_at == nil
     assert updated_state.maturity_gate_snapshot.error =~ "rate_limited"
   end
@@ -217,7 +191,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert log =~ "state=In Review"
     assert log =~ "labels=[\"needs-review\"]"
     assert log =~ "maturity_labels=[\"mature\"]"
-    assert log =~ "maturity_gate_state_scope=[\"todo\"]"
     assert log =~ "daemon_states=[\"Happy\", \"Unhappy\"]"
     assert log =~ "terminal_states="
     assert length(String.split(log, "Maturity gate rejected dispatch")) == 2
@@ -295,7 +268,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert log =~ "Maturity gate rejected dispatch"
     assert log =~ "issue_identifier=ABC-PROGRESS"
     assert log =~ "dependent_state=\"In Progress\""
-    assert log =~ "maturity_gate_state_scope=[\"todo\"]"
   end
 
   test "logs slot exhaustion as dispatch rejection, not a gate decision" do
@@ -491,8 +463,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
   end
 
   test "mature waiting-for-ci blocker is dispatch-eligible" do
-    write_maturity_workflow!(maturity_gate_state_scope: ["Todo", "Active"])
-
     mature_blocker = blocker(id: "blocker-mature", state: "Waiting for CI", labels: ["mature"])
     immature_blocker = %{mature_blocker | labels: []}
 
@@ -592,7 +562,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
 
   defp write_maturity_workflow!(opts \\ []) do
     maturity_labels = Keyword.get(opts, :maturity_labels, ["mature"])
-    maturity_gate_state_scope = Keyword.get(opts, :maturity_gate_state_scope, ["todo"])
     workspace_root = Keyword.get(opts, :workspace_root, Path.join(System.tmp_dir!(), "symphony_workspaces"))
 
     workflow = """
@@ -605,7 +574,6 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
       daemon_dispatch_states: ["Evaluating"]
       daemon_default_wake: "1h"
       maturity_labels: #{yaml_value(maturity_labels)}
-      maturity_gate_state_scope: #{yaml_value(maturity_gate_state_scope)}
     workspace:
       root: #{yaml_value(workspace_root)}
     agent:

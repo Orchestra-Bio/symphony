@@ -473,7 +473,6 @@ defmodule SymphonyElixir.ExtensionsTest do
                "error" => nil,
                "config" => %{
                  "maturity_labels" => ["mature"],
-                 "maturity_gate_state_scope" => ["todo"],
                  "daemon_states" => ["happy", "unhappy"],
                  "terminal_states" => ["canceled", "done"]
                },
@@ -485,7 +484,6 @@ defmodule SymphonyElixir.ExtensionsTest do
                    "title" => "Gated dependent",
                    "state" => "Todo",
                    "status" => "gated",
-                   "scope" => "in_scope",
                    "blockers" => [
                      %{
                        "id" => "blocker-done",
@@ -513,28 +511,6 @@ defmodule SymphonyElixir.ExtensionsTest do
                        "status" => "ignored",
                        "reasons" => ["daemon_state"],
                        "reason" => "ignored as a daemon-state blocker"
-                     }
-                   ]
-                 }
-               ],
-               "out_of_scope" => [
-                 %{
-                   "issue_id" => "issue-out",
-                   "issue_identifier" => "MT-OUT",
-                   "issue_url" => "https://example.org/issues/MT-OUT",
-                   "title" => "Out of scope dependent",
-                   "state" => "In Progress",
-                   "status" => "eligible",
-                   "scope" => "out_of_scope",
-                   "blockers" => [
-                     %{
-                       "id" => "blocker-immature",
-                       "identifier" => "ABC-IMMATURE",
-                       "state" => "In Review",
-                       "labels" => ["pink"],
-                       "status" => "out_of_scope",
-                       "reasons" => ["out_of_gate_scope"],
-                       "reason" => "dependent state is out of gate scope"
                      }
                    ]
                  }
@@ -754,8 +730,6 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Gated dependent"
     assert html =~ "ABC-IMMATURE"
     assert html =~ "missing maturity label"
-    assert html =~ "MT-OUT"
-    assert html =~ "dependent state is out of gate scope"
     assert html =~ "Runtime"
     assert html =~ "Live"
     assert html =~ "Offline"
@@ -953,7 +927,6 @@ defmodule SymphonyElixir.ExtensionsTest do
         evaluated_at: ~U[2026-08-02 16:00:00Z],
         config: %{
           maturity_labels: ["mature"],
-          maturity_gate_state_scope: ["todo"],
           daemon_states: ["happy", "unhappy"],
           terminal_states: ["canceled", "done"]
         },
@@ -965,7 +938,6 @@ defmodule SymphonyElixir.ExtensionsTest do
             title: "Gated dependent",
             state: "Todo",
             status: :gated,
-            scope: :in_scope,
             blockers: [
               %{
                 id: "blocker-done",
@@ -990,27 +962,6 @@ defmodule SymphonyElixir.ExtensionsTest do
                 labels: [],
                 status: :ignored,
                 reasons: [:daemon_state]
-              }
-            ]
-          }
-        ],
-        out_of_scope: [
-          %{
-            issue_id: "issue-out",
-            identifier: "MT-OUT",
-            issue_url: "https://example.org/issues/MT-OUT",
-            title: "Out of scope dependent",
-            state: "In Progress",
-            status: :eligible,
-            scope: :out_of_scope,
-            blockers: [
-              %{
-                id: "blocker-immature",
-                identifier: "ABC-IMMATURE",
-                state: "In Review",
-                labels: ["pink"],
-                status: :out_of_scope,
-                reasons: [:out_of_gate_scope]
               }
             ]
           }
