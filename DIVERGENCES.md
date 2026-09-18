@@ -69,6 +69,8 @@ own and does not infer Happy or Unhappy.
 `tracker.maturity_labels` extends direct Linear blocker gating: a blocker is
 satisfied when it is terminal or carries one configured maturity label. An empty
 label list reproduces upstream terminal-only behavior across every active state.
+Upstream applies blocker gating only to `Todo` candidates; this fork applies it
+to every active-state dispatch candidate, including retry revalidation.
 
 The gate is direct-edge only, reads Linear blocker state and labels, and does
 not inspect GitHub. Daemon-state blockers are ignored with a warning.
