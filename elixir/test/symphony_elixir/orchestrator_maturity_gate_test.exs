@@ -431,6 +431,29 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     refute log =~ "Maturity gate rejected dispatch"
   end
 
+  test "poll completes when a running ticket is maturity-gated" do
+    issue = issue(id: "running-poll-gated", identifier: "ABC-RUNNING-POLL", blocked_by: [blocker(state: "In Review")])
+    agent_pid = sleeping_process()
+
+    on_exit(fn -> send(agent_pid, :stop) end)
+
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+
+    running_state = state(%{running: %{issue.id => running_entry(issue, agent_pid)}})
+
+    log =
+      capture_log(fn ->
+        send(self(), {:updated_state, Orchestrator.maybe_dispatch_for_test(running_state)})
+      end)
+
+    assert_receive {:updated_state, updated_state}
+
+    assert updated_state.maturity_gate_snapshot.gated == []
+    assert updated_state.running == running_state.running
+    assert log =~ "reason=already_running"
+    refute log =~ "Maturity gate rejected dispatch"
+  end
+
   test "retry lookup uses the shared maturity gate" do
     issue_id = "retry-dependent"
     immature = issue(id: issue_id, identifier: "ABC-RETRY", state: "In Progress", blocked_by: [blocker(state: "In Review")])

@@ -1270,16 +1270,20 @@ defmodule SymphonyElixir.Orchestrator do
     issue_decisions =
       issues
       |> Enum.filter(&candidate_issue?(&1, context))
-      |> Enum.reject(fn %Issue{id: id} -> Map.has_key?(state.running, id) or Map.has_key?(state.blocked, id) end)
       |> Enum.map(fn %Issue{} = issue ->
         %{issue: issue, decision: MaturityGate.evaluate(issue, context.maturity_gate_config)}
+      end)
+
+    snapshot_issue_decisions =
+      Enum.reject(issue_decisions, fn %{issue: %Issue{id: id}} ->
+        Map.has_key?(state.running, id) or Map.has_key?(state.blocked, id)
       end)
 
     state = %{
       state
       | maturity_gate_snapshot: %{
-          gated: maturity_gate_issue_decisions(issue_decisions, :gated),
-          out_of_scope: maturity_gate_issue_decisions(issue_decisions, :out_of_scope),
+          gated: maturity_gate_issue_decisions(snapshot_issue_decisions, :gated),
+          out_of_scope: maturity_gate_issue_decisions(snapshot_issue_decisions, :out_of_scope),
           evaluated_at: DateTime.utc_now(),
           error: nil
         }
