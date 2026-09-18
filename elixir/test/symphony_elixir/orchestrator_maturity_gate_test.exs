@@ -18,7 +18,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     :ok
   end
 
-  test "candidate selection uses default Todo maturity gate scope" do
+  test "candidate selection gates direct blockers in every active state" do
     immature_blocker = blocker(id: "blocker-immature", state: "In Review")
     mature_blocker = %{immature_blocker | labels: ["mature"]}
 
@@ -34,14 +34,20 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
                state()
              )
 
+    assert {false, _state} =
+             Orchestrator.evaluate_dispatch_issue_for_test(
+               issue(id: "progress-gated", state: "In Progress", blocked_by: [immature_blocker]),
+               state()
+             )
+
     assert {true, _state} =
              Orchestrator.evaluate_dispatch_issue_for_test(
-               issue(id: "progress-default-scope", state: "In Progress", blocked_by: [immature_blocker]),
+               issue(id: "progress-mature", state: "In Progress", blocked_by: [mature_blocker]),
                state()
              )
   end
 
-  test "candidate selection gates explicitly widened states" do
+  test "candidate selection gates active states regardless of configured scope" do
     write_maturity_workflow!(maturity_gate_state_scope: ["todo", "in progress"])
 
     immature_blocker = blocker(id: "blocker-immature", state: "In Review")
@@ -76,7 +82,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert log =~ "ABC-DAEMON"
   end
 
-  test "maturity gate snapshot exposes config, gated blockers, and out-of-scope ungated work" do
+  test "maturity gate snapshot exposes gated blockers in every active state" do
     terminal_blocker = blocker(id: "blocker-done", identifier: "ABC-DONE", state: "Done")
     mature_blocker = blocker(id: "blocker-mature", identifier: "ABC-MATURE", state: "In Review", labels: ["mature"])
     immature_blocker = blocker(id: "blocker-immature", identifier: "ABC-IMMATURE", state: "In Review")
@@ -91,16 +97,16 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
         blocked_by: [terminal_blocker, mature_blocker, immature_blocker, daemon_blocker]
       )
 
-    out_of_scope_issue =
+    active_issue =
       issue(
-        id: "out-of-scope-dependent",
+        id: "active-dependent",
         identifier: "ABC-OUT",
         title: "Out of scope dependent",
         state: "In Progress",
         blocked_by: [immature_blocker]
       )
 
-    snapshot = Orchestrator.maturity_gate_snapshot_for_test([gated_issue, out_of_scope_issue], state())
+    snapshot = Orchestrator.maturity_gate_snapshot_for_test([gated_issue, active_issue], state())
 
     assert snapshot.config == %{
              terminal_states: ["canceled", "done"],
@@ -119,6 +125,14 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
                status: :gated,
                scope: :in_scope,
                blockers: gated_blockers
+             },
+             %{
+               identifier: "ABC-OUT",
+               title: "Out of scope dependent",
+               state: "In Progress",
+               status: :gated,
+               scope: :in_scope,
+               blockers: [%{identifier: "ABC-IMMATURE", status: :gating, reasons: [:not_terminal, :missing_maturity_label]}]
              }
            ] = snapshot.gated
 
@@ -129,16 +143,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
              {"ABC-DAEMON", :ignored, [:daemon_state]}
            ]
 
-    assert [
-             %{
-               identifier: "ABC-OUT",
-               title: "Out of scope dependent",
-               state: "In Progress",
-               status: :eligible,
-               scope: :out_of_scope,
-               blockers: [%{identifier: "ABC-IMMATURE", status: :out_of_scope, reasons: [:out_of_gate_scope]}]
-             }
-           ] = snapshot.out_of_scope
+    assert snapshot.out_of_scope == []
   end
 
   test "poll updates maturity gate snapshot even when dispatch slots are full" do
@@ -273,8 +278,8 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
     assert log =~ "identifier=ABC-BLOCKER-B"
   end
 
-  test "logs out-of-scope maturity gate decisions without gating dispatch" do
-    out_of_scope_issue =
+  test "logs maturity gate decisions for active tickets outside the former Todo scope" do
+    active_issue =
       issue(
         id: "progress-dependent",
         identifier: "ABC-PROGRESS",
@@ -284,14 +289,13 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
 
     log =
       capture_log(fn ->
-        assert {true, _state} = Orchestrator.evaluate_dispatch_issue_for_test(out_of_scope_issue, state())
+        assert {false, _state} = Orchestrator.evaluate_dispatch_issue_for_test(active_issue, state())
       end)
 
-    assert log =~ "Maturity gate skipped; issue out of gate scope"
+    assert log =~ "Maturity gate rejected dispatch"
     assert log =~ "issue_identifier=ABC-PROGRESS"
     assert log =~ "dependent_state=\"In Progress\""
     assert log =~ "maturity_gate_state_scope=[\"todo\"]"
-    refute log =~ "Maturity gate rejected dispatch"
   end
 
   test "logs slot exhaustion as dispatch rejection, not a gate decision" do
@@ -443,7 +447,7 @@ defmodule SymphonyElixir.OrchestratorMaturityGateTest do
              end)
   end
 
-  test "todo dependent with mature waiting-for-ci blocker is dispatch-eligible" do
+  test "mature waiting-for-ci blocker is dispatch-eligible" do
     write_maturity_workflow!(maturity_gate_state_scope: ["Todo", "Active"])
 
     mature_blocker = blocker(id: "blocker-mature", state: "Waiting for CI", labels: ["mature"])
